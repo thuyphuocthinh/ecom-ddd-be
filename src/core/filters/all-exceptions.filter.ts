@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
+import { ClsService } from 'nestjs-cls';
 import { DomainException } from '../exceptions/domain.exception.js';
 import { CoreErrorCodes } from '../exceptions/error-codes.js';
 import { randomUUID } from 'crypto';
@@ -15,11 +16,13 @@ import { randomUUID } from 'crypto';
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
+  constructor(private readonly cls: ClsService) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const traceId = randomUUID();
+    const traceId = this.cls.getId() || randomUUID();
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = CoreErrorCodes.SYSTEM_ERROR.message;
@@ -47,8 +50,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
     }
 
+    // Ghi log lỗi, AppLogger sẽ tự động thêm [TraceId-...] ở đầu nên không cần thêm thủ công ở đây
     this.logger.error(
-      `[${traceId}] ${request.method} ${request.url} - ${status} - ${message}`,
+      `${request.method} ${request.url} - ${status} - ${message}`,
       exception instanceof Error ? exception.stack : '',
     );
 
