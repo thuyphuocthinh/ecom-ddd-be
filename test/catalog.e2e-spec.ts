@@ -1,0 +1,196 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
+import request from 'supertest';
+import { AppModule } from './../src/app.module.js';
+import { PrismaService } from './../src/core/database/prisma.service.js';
+import { AllExceptionsFilter } from './../src/core/filters/all-exceptions.filter.js';
+import { ClsService } from 'nestjs-cls';
+import { ResponseInterceptor } from './../src/core/interceptors/response.interceptor.js';
+
+describe('CatalogController (e2e)', () => {
+  let app: INestApplication;
+  let prismaService: PrismaService;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    const clsService = app.get(ClsService);
+    app.useGlobalFilters(new AllExceptionsFilter(clsService));
+    app.useGlobalInterceptors(new ResponseInterceptor());
+    app.setGlobalPrefix('api/v1');
+
+    await app.init();
+
+    prismaService = app.get(PrismaService);
+  });
+
+  beforeEach(async () => {
+    await prismaService.product.deleteMany();
+    await prismaService.category.deleteMany();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  describe('/api/v1/catalog/categories (POST)', () => {
+    it('should create a root category', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({
+          name: 'Electronics',
+        })
+        .expect(201);
+
+      expect(res.body.data).toHaveProperty('id');
+      expect(res.body.data.name).toBe('Electronics');
+      expect(res.body.data.path).toContain('/');
+    });
+  });
+
+  describe('/api/v1/catalog/products (POST)', () => {
+    it('should create a product with skus', async () => {
+      // 1. Create a category first
+      const categoryRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Laptops' });
+
+      const categoryId = categoryRes.body.data.id;
+
+      // 2. Create a product
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/catalog/products')
+        .send({
+          categoryId,
+          name: 'MacBook Pro',
+          description: 'Apple Laptop',
+          thumbnail: 'macbook.jpg',
+          skus: [
+            {
+              skuCode: 'MBP-14',
+              price: 1999,
+              attributes: { color: 'Silver', ram: '16GB' },
+            },
+          ],
+        })
+        .expect(201);
+
+      expect(res.body.data).toHaveProperty('id');
+      expect(res.body.data.name).toBe('MacBook Pro');
+      expect(res.body.data.skus).toHaveLength(1);
+      expect(res.body.data.skus[0].skuCode).toBe('MBP-14');
+    });
+
+    it('should fail if category does not exist', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/catalog/products')
+        .send({
+          categoryId: 'non_existent_category',
+          name: 'Fake Product',
+          skus: [],
+        })
+        .expect(400); // 400 because Domain Exception mapped to 400 or 404
+    });
+  });
+
+  describe('/api/v1/catalog/categories/:id (DELETE)', () => {
+    it('should delete a category with no products', async () => {
+      const categoryRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Empty Category' });
+
+      const categoryId = categoryRes.body.data.id;
+
+      await request(app.getHttpServer())
+        .delete(`/api/v1/catalog/categories/${categoryId}`)
+        .expect(204);
+    });
+
+    it('should not delete a category with products', async () => {
+      const categoryRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Laptops' });
+      const categoryId = categoryRes.body.data.id;
+
+      await request(app.getHttpServer())
+        .post('/api/v1/catalog/products')
+        .send({ categoryId, name: 'MacBook', skus: [] });
+
+      await request(app.getHttpServer())
+        .delete(`/api/v1/catalog/categories/${categoryId}`)
+        .expect(400); // CAT-011 CATEGORY_HAS_PRODUCTS
+    });
+  });
+
+  describe('/api/v1/catalog/categories/:id/move (PATCH)', () => {
+    it('should move a category to a new parent', async () => {
+      const rootRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Root 1' });
+
+      const childRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Child 1', parentId: rootRes.body.data.id });
+
+      const newRootRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Root 2' });
+
+      const moveRes = await request(app.getHttpServer())
+        .patch(`/api/v1/catalog/categories/${childRes.body.data.id}/move`)
+        .send({ newParentId: newRootRes.body.data.id })
+        .expect(200);
+
+      expect(moveRes.body.data.path).toContain(
+        `/${newRootRes.body.data.id}/${childRes.body.data.id}/`,
+      );
+    });
+  });
+
+  describe('/api/v1/catalog/products/:id/publish (PATCH)', () => {
+    it('should publish a product successfully', async () => {
+      const categoryRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Laptops' });
+
+      const productRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/products')
+        .send({
+          categoryId: categoryRes.body.data.id,
+          name: 'MacBook Pro',
+          skus: [{ skuCode: 'MBP-1', price: 1999, attributes: {} }],
+        });
+
+      const publishRes = await request(app.getHttpServer())
+        .patch(`/api/v1/catalog/products/${productRes.body.data.id}/publish`)
+        .expect(200);
+
+      expect(publishRes.body.data.status).toBe('PUBLISHED');
+    });
+
+    it('should not publish a product without skus', async () => {
+      const categoryRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Laptops' });
+
+      const productRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/products')
+        .send({
+          categoryId: categoryRes.body.data.id,
+          name: 'Empty MacBook',
+          skus: [],
+        });
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/catalog/products/${productRes.body.data.id}/publish`)
+        .expect(400); // CAT-003 INVALID_PUBLISH
+    });
+  });
+});

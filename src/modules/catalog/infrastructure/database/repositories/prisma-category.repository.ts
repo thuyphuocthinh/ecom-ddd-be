@@ -1,0 +1,86 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { ICategoryRepository, Category } from '../../../domain/index.js';
+import { PrismaService } from '@/core/index.js';
+import { CatalogMapper } from '../mappers/catalog.mapper.js';
+
+@Injectable()
+export class PrismaCategoryRepository implements ICategoryRepository {
+  private readonly logger = new Logger(PrismaCategoryRepository.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findById(id: string): Promise<Category | null> {
+    this.logger.debug(`Finding category by ID: ${id}`);
+    const category = await this.prisma.category.findUnique({
+      where: { id },
+    });
+    if (!category) return null;
+    return CatalogMapper.toCategoryDomain(category);
+  }
+
+  async findByParentId(parentId: string | null): Promise<Category[]> {
+    this.logger.debug(`Finding categories by parent ID: ${parentId}`);
+    const categories = await this.prisma.category.findMany({
+      where: { parentId },
+      orderBy: { name: 'asc' }, // Sắp xếp theo tên cho dễ nhìn
+    });
+    return categories.map((cat) => CatalogMapper.toCategoryDomain(cat));
+  }
+
+  async save(category: Category): Promise<void> {
+    this.logger.debug(`Saving category: ${category.id}`);
+    const data = CatalogMapper.toCategoryPersistence(category);
+    await this.prisma.category.upsert({
+      where: { id: data.id },
+      create: data,
+      update: data,
+    });
+  }
+
+  async updatePathAndChildren(
+    category: Category,
+    oldPath: string,
+  ): Promise<void> {
+    this.logger.debug(
+      `Updating path and children for category: ${category.id}`,
+    );
+    const data = CatalogMapper.toCategoryPersistence(category);
+    const newPath = category.path;
+
+    // Use transaction to ensure data integrity during tree move
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Update the category itself
+      await tx.category.update({
+        where: { id: data.id },
+        data: {
+          parentId: data.parentId,
+          path: data.path,
+        },
+      });
+
+      // 2. Bulk update all descendants
+      // We use raw query because Prisma doesn't support REPLACE function natively
+      // Example: REPLACE('/old/path/', '/new/path/')
+      await tx.$executeRaw`
+        UPDATE "Category"
+        SET "path" = REPLACE("path", ${oldPath}, ${newPath})
+        WHERE "path" LIKE ${oldPath + '%'};
+      `;
+    });
+  }
+
+  async hasProducts(id: string): Promise<boolean> {
+    this.logger.debug(`Checking if category has products: ${id}`);
+    const count = await this.prisma.product.count({
+      where: { categoryId: id },
+    });
+    return count > 0;
+  }
+
+  async delete(id: string): Promise<void> {
+    this.logger.debug(`Deleting category: ${id}`);
+    await this.prisma.category.delete({
+      where: { id },
+    });
+  }
+}
