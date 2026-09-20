@@ -10,3 +10,56 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Category {
+  id        String     @id
+  parentId  String?
+  name      String     @db.VarChar(255)
+  path      String     @unique @db.VarChar(500)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  
+  parent    Category?  @relation("CategoryToCategory", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryToCategory")
+  products  Product[]
+
+  @@index([path])
+}
+
+model Product {
+  id          String        @id
+  categoryId  String
+  name        String        @db.VarChar(255)
+  description String?       @db.Text
+  thumbnail   String?       @db.VarChar(500)
+  status      ProductStatus @default(DRAFT)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  category    Category      @relation(fields: [categoryId], references: [id])
+  skus        Sku[]
+
+  @@index([categoryId, status])
+}
+
+model Sku {
+  id         String   @id
+  productId  String
+  price      Decimal  @db.Decimal(10, 2)
+  attributes Json
+  skuCode    String   @unique @db.VarChar(100)
+  barcode    String?  @unique @db.VarChar(100)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
