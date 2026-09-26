@@ -81,6 +81,22 @@ describe('CatalogController (e2e)', () => {
       );
       expect(matching).toHaveLength(1);
     });
+
+    it('should reject reusing an Idempotency-Key with a different payload', async () => {
+      const idempotencyKey = `test-key-mismatch-${Date.now()}`;
+
+      await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .set('Idempotency-Key', idempotencyKey)
+        .send({ name: 'Toys' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .set('Idempotency-Key', idempotencyKey)
+        .send({ name: 'Garden' })
+        .expect(409);
+    });
   });
 
   describe('/api/v1/catalog/products (POST)', () => {

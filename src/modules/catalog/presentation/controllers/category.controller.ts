@@ -33,7 +33,10 @@ import {
   GetCategoryByIdQuery,
 } from '../../application/index.js';
 import { Category } from '../../domain/index.js';
-import { IdempotencyService } from '@/core/index.js';
+import {
+  IdempotencyService,
+  computeIdempotencyFingerprint,
+} from '@/core/index.js';
 
 @ApiTags('Catalog - Categories')
 @Controller('catalog/categories')
@@ -63,14 +66,18 @@ export class CategoryController {
     @Body() dto: CreateCategoryDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.idempotencyService.execute(idempotencyKey, async () => {
-      const command = new CreateCategoryCommand(dto.name, dto.parentId);
-      const category = await this.commandBus.execute<
-        CreateCategoryCommand,
-        Category
-      >(command);
-      return CategoryMapper.toResponse(category);
-    });
+    return this.idempotencyService.execute(
+      idempotencyKey,
+      computeIdempotencyFingerprint(dto),
+      async () => {
+        const command = new CreateCategoryCommand(dto.name, dto.parentId);
+        const category = await this.commandBus.execute<
+          CreateCategoryCommand,
+          Category
+        >(command);
+        return CategoryMapper.toResponse(category);
+      },
+    );
   }
 
   @Get()

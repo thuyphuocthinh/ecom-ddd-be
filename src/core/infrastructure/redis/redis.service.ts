@@ -14,6 +14,12 @@ export class RedisService implements OnModuleDestroy {
     this.redisClient = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
       port: Number(process.env.REDIS_PORT) || 6379,
+      connectTimeout: 5000,
+      // Without this, a command on an already-open-but-unresponsive
+      // connection (Redis wedged, network black hole, ...) hangs forever
+      // instead of rejecting — every caller here awaits these commands
+      // directly, so that would hang the HTTP request itself.
+      commandTimeout: 5000,
     });
   }
 

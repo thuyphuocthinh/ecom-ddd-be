@@ -21,7 +21,10 @@ import {
   ApiExtraModels,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { IdempotencyService } from '@/core/index.js';
+import {
+  IdempotencyService,
+  computeIdempotencyFingerprint,
+} from '@/core/index.js';
 import { CreateProductDto } from '../dtos/create-product.dto.js';
 import { GetProductsDto } from '../dtos/get-products.dto.js';
 import { UpdateProductDto } from '../dtos/update-product.dto.js';
@@ -72,21 +75,25 @@ export class ProductController {
     @Body() dto: CreateProductDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.idempotencyService.execute(idempotencyKey, async () => {
-      const command = new CreateProductCommand(
-        dto.categoryId,
-        dto.name,
-        dto.description,
-        dto.thumbnail,
-        dto.skus,
-      );
+    return this.idempotencyService.execute(
+      idempotencyKey,
+      computeIdempotencyFingerprint(dto),
+      async () => {
+        const command = new CreateProductCommand(
+          dto.categoryId,
+          dto.name,
+          dto.description,
+          dto.thumbnail,
+          dto.skus,
+        );
 
-      const product = await this.commandBus.execute<
-        CreateProductCommand,
-        Product
-      >(command);
-      return ProductMapper.toResponse(product);
-    });
+        const product = await this.commandBus.execute<
+          CreateProductCommand,
+          Product
+        >(command);
+        return ProductMapper.toResponse(product);
+      },
+    );
   }
 
   @Patch(':id')
