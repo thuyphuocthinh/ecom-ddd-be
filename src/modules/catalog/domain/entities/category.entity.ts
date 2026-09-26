@@ -79,4 +79,10 @@ export class Category extends Entity<CategoryProps> {
 
     this.updatedAt = new Date();
   }
+
+  public updateDetails(name?: string, isActive?: boolean): void {
+    if (name) this.props.name = name;
+    if (isActive !== undefined) this.props.isActive = isActive;
+    this.updatedAt = new Date();
+  }
 }

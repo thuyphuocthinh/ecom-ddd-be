@@ -10,6 +10,7 @@ import {
   CreateProductHandler,
   GetProductsHandler,
   GetProductByIdHandler,
+  GetCategoryByIdHandler,
   CreateCategoryHandler,
   GetCategoriesHandler,
   DeleteCategoryHandler,
@@ -17,6 +18,7 @@ import {
   PublishProductHandler,
   UnpublishProductHandler,
   UpdateProductHandler,
+  UpdateCategoryHandler,
   AddSkuHandler,
   RemoveSkuHandler,
   UpdateSkuPriceHandler,
@@ -36,6 +38,7 @@ const CommandHandlers = [
   PublishProductHandler,
   UnpublishProductHandler,
   UpdateProductHandler,
+  UpdateCategoryHandler,
   AddSkuHandler,
   RemoveSkuHandler,
   UpdateSkuPriceHandler,
@@ -44,6 +47,7 @@ const QueryHandlers = [
   GetProductsHandler,
   GetProductByIdHandler,
   GetCategoriesHandler,
+  GetCategoryByIdHandler,
 ];
 
 @Module({

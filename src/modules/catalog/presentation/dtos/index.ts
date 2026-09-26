@@ -5,5 +5,6 @@ export * from './create-product.dto.js';
 export * from './get-products.dto.js';
 export * from './move-category.dto.js';
 export * from './product-response.dto.js';
+export * from './update-category.dto.js';
 export * from './update-product.dto.js';
 export * from './update-sku-price.dto.js';
