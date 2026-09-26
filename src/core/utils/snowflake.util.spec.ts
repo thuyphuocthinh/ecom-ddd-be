@@ -27,4 +27,14 @@ describe('SnowflakeGenerator', () => {
     expect(() => new SnowflakeGenerator(2000)).toThrow();
     expect(() => new SnowflakeGenerator(-1)).toThrow();
   });
+
+  it('should derive a machine ID within valid bounds when PROCESS_ID is unset', () => {
+    const original = process.env.PROCESS_ID;
+    delete process.env.PROCESS_ID;
+    try {
+      expect(() => new SnowflakeGenerator()).not.toThrow();
+    } finally {
+      if (original !== undefined) process.env.PROCESS_ID = original;
+    }
+  });
 });

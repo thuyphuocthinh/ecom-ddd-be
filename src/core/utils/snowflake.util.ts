@@ -1,3 +1,18 @@
+import { hostname } from 'os';
+import { createHash } from 'crypto';
+
+/**
+ * Derives a machine id from the host's hostname when PROCESS_ID isn't set
+ * explicitly, so different containers/instances don't silently collide on
+ * the same default id (each container gets a distinct hostname in
+ * Docker/Kubernetes, unlike a fixed literal default).
+ */
+function deriveMachineIdFromHostname(maxMachineId: number): number {
+  const hash = createHash('sha256').update(hostname()).digest();
+  const value = hash.readUInt32BE(0);
+  return value % (maxMachineId + 1);
+}
+
 /**
  * Trình tạo Snowflake ID.
  * Cấu trúc (64 bit) trả về dưới dạng string:
@@ -23,8 +38,13 @@ export class SnowflakeGenerator {
   constructor(machineId?: number) {
     let id = machineId;
     if (id === undefined) {
-      // Đọc từ biến môi trường, mặc định là 1 nếu không có
-      id = parseInt(process.env.PROCESS_ID || '1', 10);
+      // PROCESS_ID lets an operator pin an explicit id (e.g. from a k8s
+      // pod ordinal). Without it, every instance would otherwise fall back
+      // to the same hardcoded default and risk generating colliding ids —
+      // so instead each host derives its own id from its hostname.
+      id = process.env.PROCESS_ID
+        ? parseInt(process.env.PROCESS_ID, 10)
+        : deriveMachineIdFromHostname(Number(this.MAX_MACHINE_ID));
     }
 
     this.machineId = BigInt(id);
