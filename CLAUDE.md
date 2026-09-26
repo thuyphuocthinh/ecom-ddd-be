@@ -41,6 +41,12 @@ pnpm start:dev          # NestJS watch mode
   ```
 - Only the Aggregate Root gets a repository (e.g. `ProductRepository`, never `SkuRepository`). Child entities are only reachable through their root.
 
+## Code Quality — Clean Code & SOLID (mandatory)
+- **NestJS module files (`*.module.ts`) are wiring only** — imports, providers, controllers array. No functions, no regex, no business logic defined inline in a module file. If a module file needs a helper (a validator, an id resolver, a mapper), that helper gets its own file under `core/utils/`, `core/config/`, or the owning module's own layer, and the module file only imports and references it.
+- **Single Responsibility per file/class**: a repository persists, a mapper translates, a handler orchestrates a use case, an entity holds domain rules. Don't fold a second responsibility into a class because it's convenient in the moment (e.g. don't validate input inside a repository, don't put domain logic inside a controller).
+- **Depend on abstractions, not concretions**: application/command handlers depend on the `I*Repository` port from `domain/repositories`, never directly on `PrismaService` or a concrete `Prisma*Repository`.
+- When reviewing your own diff before committing, check for logic that landed in the wrong layer (especially module/bootstrap files) and move it before asking for a commit.
+
 ## Onboarding — how to use AI when joining this project
 1. Have the AI read [`../docs/architecture.md`](../docs/architecture.md) and this file first, then ask it to summarize the module boundaries in its own words. Verify it got the Aggregate Root rule and the CQRS command/query split right before trusting it with code.
 2. Pick one existing bounded context (`src/modules/catalog` is the most complete) and ask the AI to trace one full flow end to end: controller → command handler → domain entity → repository → outbox/RabbitMQ. This teaches the real data flow faster than reading file by file.
