@@ -42,7 +42,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code = `HTTP_${status}`;
       }
     } else if (exception instanceof DomainException) {
-      status = HttpStatus.BAD_REQUEST;
+      status = exception.status;
       message = exception.message;
       code = exception.code;
       errors = exception.details || null;

@@ -96,7 +96,7 @@ describe('CatalogController (e2e)', () => {
           name: 'Fake Product',
           skus: [],
         })
-        .expect(400); // 400 because Domain Exception mapped to 400 or 404
+        .expect(404); // CAT-005 CATEGORY_NOT_FOUND
     });
   });
 
@@ -185,7 +185,7 @@ describe('CatalogController (e2e)', () => {
 
       await request(app.getHttpServer())
         .delete(`/api/v1/catalog/categories/${categoryId}`)
-        .expect(400); // CAT-011 CATEGORY_HAS_PRODUCTS
+        .expect(409); // CAT-011 CATEGORY_HAS_PRODUCTS
     });
   });
 
