@@ -37,17 +37,13 @@ export class PrismaProductRepository implements IProductRepository {
         update: productData,
       });
 
-      // 2. Fetch existing SKUs to calculate diff
+      // 2. Fetch existing SKUs to tell creates from updates
       const existingSkus = await tx.sku.findMany({
         where: { productId: product.id },
         select: { id: true },
       });
       const existingSkuIds = existingSkus.map((s) => s.id);
-      const newSkuIds = skusData.map((s) => s.id);
 
-      const skusToDelete = existingSkuIds.filter(
-        (id) => !newSkuIds.includes(id),
-      );
       const skusToCreate = skusData.filter(
         (s) => !existingSkuIds.includes(s.id),
       );
@@ -55,7 +51,14 @@ export class PrismaProductRepository implements IProductRepository {
         existingSkuIds.includes(s.id),
       );
 
-      // 3. Apply SKU diffs
+      // 3. Apply SKU diffs.
+      // Deletions use the aggregate's explicit removedSkuIds instead of
+      // "existing in DB but absent from this in-memory snapshot" — otherwise
+      // a SKU added by a concurrent request after this product was loaded
+      // would look identical to a removed one and get deleted here too.
+      const skusToDelete = product.removedSkuIds.filter((id) =>
+        existingSkuIds.includes(id),
+      );
       if (skusToDelete.length > 0) {
         await tx.sku.deleteMany({
           where: { id: { in: skusToDelete } },

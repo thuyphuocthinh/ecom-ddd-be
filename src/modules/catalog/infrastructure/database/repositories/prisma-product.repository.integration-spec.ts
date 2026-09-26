@@ -121,4 +121,42 @@ describe('PrismaProductRepository (Integration)', () => {
     expect(result2.meta.hasMore).toBe(false);
     expect(result2.meta.nextCursor).toBe(null);
   });
+
+  it('should not delete a SKU added concurrently by another request', async () => {
+    const category = Category.create('Shoes', null, 'cat_shoes');
+    await categoryRepo.save(category);
+
+    const initial = Product.create(
+      { categoryId: 'cat_shoes', name: 'Sneaker' },
+      'prod_sneaker',
+    );
+    initial.addSku({
+      price: 100,
+      attributes: { size: '40' },
+      skuCode: 'SNK-40',
+    });
+    await productRepo.save(initial);
+
+    // Two requests load the same product before either one saves.
+    const requestA = await productRepo.findById('prod_sneaker');
+    const requestB = await productRepo.findById('prod_sneaker');
+
+    // Request A adds a new SKU and saves first.
+    requestA!.addSku({
+      price: 120,
+      attributes: { size: '41' },
+      skuCode: 'SNK-41',
+    });
+    await productRepo.save(requestA!);
+
+    // Request B only updates the product's name — it never touched SKUs —
+    // and saves from its now-stale in-memory snapshot (still just SNK-40).
+    requestB!.updateDetails('Sneaker Pro');
+    await productRepo.save(requestB!);
+
+    const final = await productRepo.findById('prod_sneaker');
+    const skuCodes = final?.getProps().skus.map((s) => s.getProps().skuCode);
+    expect(skuCodes).toContain('SNK-40');
+    expect(skuCodes).toContain('SNK-41');
+  });
 });

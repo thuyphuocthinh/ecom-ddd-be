@@ -48,4 +48,23 @@ describe('Product Entity', () => {
       new CatalogDomainException(CatalogErrorCodes.SKU_DUPLICATED),
     );
   });
+
+  it('should track removed SKU ids without touching untouched SKUs', () => {
+    const product = Product.create({ categoryId: 'cat_1', name: 'Test' });
+    const skuA = product.addSku({
+      price: 100000,
+      attributes: { color: 'Red' },
+      skuCode: 'A',
+    });
+    product.addSku({
+      price: 100000,
+      attributes: { color: 'Blue' },
+      skuCode: 'B',
+    });
+
+    product.removeSku(skuA.id);
+
+    expect(product.removedSkuIds).toEqual([skuA.id]);
+    expect(product.skus.map((s) => s.skuCode)).toEqual(['B']);
+  });
 });

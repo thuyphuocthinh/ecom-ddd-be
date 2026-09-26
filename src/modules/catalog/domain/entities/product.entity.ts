@@ -18,6 +18,16 @@ export interface ProductProps {
 }
 
 export class Product extends AggregateRoot<ProductProps> {
+  // SKU ids explicitly removed via removeSku() during this use case.
+  // The repository deletes exactly these rows instead of diffing its DB
+  // read against this in-memory snapshot, so a SKU concurrently added by
+  // another request in between is never mistaken for one to delete.
+  private _removedSkuIds: string[] = [];
+
+  get removedSkuIds(): string[] {
+    return [...this._removedSkuIds];
+  }
+
   static create(
     props: Omit<ProductProps, 'status' | 'skus'>,
     id?: string,
@@ -72,6 +82,7 @@ export class Product extends AggregateRoot<ProductProps> {
       throw new CatalogDomainException(CatalogErrorCodes.SKU_NOT_FOUND);
     }
 
+    this._removedSkuIds.push(skuId);
     this.updatedAt = new Date();
   }
 
