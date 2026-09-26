@@ -101,14 +101,21 @@ describe('PrismaProductRepository (Integration)', () => {
     await productRepo.save(product3);
 
     // Find without cursor
-    const result1 = await productRepo.findList(undefined, 2, 'cat_phone');
+    const result1 = await productRepo.findList({
+      limit: 2,
+      categoryId: 'cat_phone',
+    });
     expect(result1.data).toHaveLength(2);
     expect(result1.data.map((p) => p.id)).toEqual(['prod_13', 'prod_14']);
     expect(result1.meta.hasMore).toBe(true);
     expect(result1.meta.nextCursor).toBe('prod_14');
 
     // Find with cursor (Keyset pagination)
-    const result2 = await productRepo.findList('prod_14', 2, 'cat_phone');
+    const result2 = await productRepo.findList({
+      cursor: 'prod_14',
+      limit: 2,
+      categoryId: 'cat_phone',
+    });
     expect(result2.data).toHaveLength(1);
     expect(result2.data[0].id).toBe('prod_15');
     expect(result2.meta.hasMore).toBe(false);
