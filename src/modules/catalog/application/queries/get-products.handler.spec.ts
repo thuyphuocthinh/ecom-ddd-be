@@ -34,7 +34,15 @@ describe('GetProductsHandler', () => {
 
     expect(result.data).toHaveLength(2);
     expect(result.data[0].id).toBe('prod_1');
-    expect(productRepo.findList).toHaveBeenCalledWith('cursor_id', 10, 'cat_1');
+    expect(productRepo.findList).toHaveBeenCalledWith({
+      limit: 10,
+      cursor: 'cursor_id',
+      categoryId: 'cat_1',
+      search: undefined,
+      status: undefined,
+      minPrice: undefined,
+      maxPrice: undefined,
+    });
   });
 
   it('should handle optional query parameters correctly', async () => {
@@ -46,6 +54,14 @@ describe('GetProductsHandler', () => {
     const query = new GetProductsQuery(20);
     await handler.execute(query);
 
-    expect(productRepo.findList).toHaveBeenCalledWith(undefined, 20, undefined);
+    expect(productRepo.findList).toHaveBeenCalledWith({
+      limit: 20,
+      cursor: undefined,
+      categoryId: undefined,
+      search: undefined,
+      status: undefined,
+      minPrice: undefined,
+      maxPrice: undefined,
+    });
   });
 });
