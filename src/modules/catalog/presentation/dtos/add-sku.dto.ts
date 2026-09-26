@@ -1,9 +1,19 @@
-import { IsNumber, IsObject, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class AddSkuDto {
-  @ApiProperty()
+  @ApiProperty({ maxLength: 100 })
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   skuCode: string;
 
   @ApiProperty()
@@ -13,10 +23,12 @@ export class AddSkuDto {
 
   @ApiProperty()
   @IsObject()
+  @IsNotEmpty()
   attributes: Record<string, string>;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ maxLength: 100 })
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   barcode?: string;
 }

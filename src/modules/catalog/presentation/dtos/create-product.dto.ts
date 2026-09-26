@@ -1,6 +1,7 @@
 import {
   IsString,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsArray,
   ValidateNested,
@@ -21,6 +22,7 @@ export class SkuDto {
     example: { color: 'Red', size: 'XL' },
     description: 'Thuộc tính cấu hình của SKU',
   })
+  @IsObject()
   @IsNotEmpty()
   attributes: Record<string, string>;
 
@@ -37,11 +39,11 @@ export class SkuDto {
   @ApiPropertyOptional({
     example: '8931234567890',
     description: 'Mã vạch (Barcode)',
-    maxLength: 50,
+    maxLength: 100,
   })
   @IsString()
   @IsOptional()
-  @MaxLength(50)
+  @MaxLength(100)
   barcode?: string;
 }
 
@@ -79,11 +81,11 @@ export class CreateProductDto {
   @ApiPropertyOptional({
     example: 'https://example.com/image.png',
     description: 'URL ảnh đại diện',
-    maxLength: 1000,
+    maxLength: 500,
   })
   @IsString()
   @IsOptional()
-  @MaxLength(1000)
+  @MaxLength(500)
   thumbnail?: string;
 
   @ApiPropertyOptional({
