@@ -1,21 +1,20 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import type { Request } from 'express';
 import { ClsModule } from 'nestjs-cls';
-import { randomUUID } from 'crypto';
 import { AppController } from './app.controller.js';
 import { CatalogModule } from './modules/catalog/catalog.module.js';
+import { validateEnv } from './core/config/env.validation.js';
+import { resolveCorrelationId } from './core/utils/correlation-id.util.js';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     ClsModule.forRoot({
       global: true,
       middleware: {
         mount: true,
         generateId: true,
-        idGenerator: (req: Request) =>
-          (req.headers['x-correlation-id'] as string) || randomUUID(),
+        idGenerator: resolveCorrelationId,
       },
     }),
     CatalogModule,

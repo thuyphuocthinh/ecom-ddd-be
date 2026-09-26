@@ -13,6 +13,7 @@ export * from './utils/snowflake.util.js';
 export * from './utils/hash.util.js';
 export * from './utils/time.util.js';
 export * from './utils/string.util.js';
+export * from './utils/correlation-id.util.js';
 
 // Database
 export * from './database/prisma.service.js';
