@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { ClsService } from 'nestjs-cls';
-import { DomainException } from '../exceptions/domain.exception.js';
-import { CoreErrorCodes } from '../exceptions/error-codes.js';
+import { DomainException } from '../../domain/exceptions/domain.exception.js';
+import { CoreErrorCodes } from '../../domain/exceptions/error-codes.js';
 import { randomUUID } from 'crypto';
 
 @Catch()

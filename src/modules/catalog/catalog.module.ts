@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
-import { PrismaService } from '@/core/index.js';
 
 // Controllers
 import { ProductController, CategoryController } from './presentation/index.js';
@@ -54,7 +53,6 @@ const QueryHandlers = [
   imports: [CqrsModule],
   controllers: [ProductController, CategoryController],
   providers: [
-    PrismaService,
     // Repositories
     {
       provide: 'IProductRepository',

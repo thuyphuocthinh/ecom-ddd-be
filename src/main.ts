@@ -2,10 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { ValidationPipe } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
-import { AllExceptionsFilter } from './core/filters/all-exceptions.filter.js';
-import { ResponseInterceptor } from './core/interceptors/response.interceptor.js';
-import { LoggingInterceptor } from './core/interceptors/logging.interceptor.js';
-import { AppLogger } from './core/logging/app.logger.js';
+import { AllExceptionsFilter } from './core/http/filters/all-exceptions.filter.js';
+import { ResponseInterceptor } from './core/http/interceptors/response.interceptor.js';
+import { LoggingInterceptor } from './core/http/interceptors/logging.interceptor.js';
+import { AppLogger } from './core/http/logging/app.logger.js';
 
 import helmet from 'helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';

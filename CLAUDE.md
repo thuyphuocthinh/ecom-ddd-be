@@ -29,9 +29,13 @@ pnpm start:dev          # NestJS watch mode
 | Unit tests | `pnpm test` |
 | E2E tests | `pnpm test:e2e` |
 | Coverage | `pnpm test:cov` |
+| Change DB schema | `npx prisma migrate dev --name <what-changed>` |
+| Apply migrations (prod/CI) | `npx prisma migrate deploy` |
+
+Schema changes go through **Prisma Migrate**, not `prisma db push` — every change must produce a file under `prisma/migrations/`. `db push` live-diffs the DB against `schema.prisma` and has actually deleted a hand-added generated column here once (nothing not declared in `schema.prisma` is safe under it); migrations don't have that failure mode. Some columns (e.g. `Product.searchVector`, a generated `tsvector`) are hand-written directly into a migration's `migration.sql` because Prisma's schema DSL can't express them — see `prisma/migrations/1_add_product_search_vector/`.
 
 ## Project Structure
-- `src/core/` — infrastructure plumbing only (database, redis, rabbitmq, base DDD classes, filters, interceptors). Never put business logic here.
+- `src/core/` — infrastructure plumbing only, never business logic. Organized by role: `domain/` (base DDD classes, shared exceptions, pure types — no framework deps), `http/` (filters, interceptors, shared DTOs, request logging), `infrastructure/` (Prisma, Redis, RabbitMQ, idempotency — external systems), `config/` (env validation), `utils/` (stateless helpers). `DatabaseModule`/`RedisModule`/`IdempotencyModule` are `@Global()` and imported once in `AppModule` — a feature module should never re-list `PrismaService` (or the other global services) in its own `providers`, that creates a second, disconnected instance.
 - `src/modules/<bounded-context>/` — one folder per bounded context (`catalog`, `inventory`, `orders`, ...), each following:
   ```
   domain/          entities, value objects, domain exceptions, repository ports
