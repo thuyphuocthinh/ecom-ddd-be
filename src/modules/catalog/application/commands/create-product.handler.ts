@@ -1,7 +1,12 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject, Logger } from '@nestjs/common';
 import { CreateProductCommand } from './create-product.command.js';
-import { Product, CatalogDomainException } from '../../domain/index.js';
+import {
+  Product,
+  Price,
+  SkuAttributes,
+  CatalogDomainException,
+} from '../../domain/index.js';
 import type {
   IProductRepository,
   ICategoryRepository,
@@ -43,7 +48,12 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
     // 3. Add SKUs if provided
     if (command.skus && command.skus.length > 0) {
       for (const sku of command.skus) {
-        product.addSku(sku);
+        product.addSku({
+          price: Price.create(sku.price),
+          attributes: SkuAttributes.create(sku.attributes),
+          skuCode: sku.skuCode,
+          barcode: sku.barcode,
+        });
       }
     }
 

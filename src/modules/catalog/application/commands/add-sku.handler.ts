@@ -1,7 +1,13 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject, Logger } from '@nestjs/common';
 import { AddSkuCommand } from './add-sku.command.js';
-import { Product, Sku, CatalogDomainException } from '../../domain/index.js';
+import {
+  Product,
+  Sku,
+  Price,
+  SkuAttributes,
+  CatalogDomainException,
+} from '../../domain/index.js';
 import type { IProductRepository } from '../../domain/index.js';
 import { CatalogErrorCodes } from '@/core/index.js';
 
@@ -28,8 +34,8 @@ export class AddSkuHandler implements ICommandHandler<AddSkuCommand> {
     }
 
     const newSku = product.addSku({
-      price: command.price,
-      attributes: command.attributes,
+      price: Price.create(command.price),
+      attributes: SkuAttributes.create(command.attributes),
       skuCode: command.skuCode,
       barcode: command.barcode,
     });

@@ -4,6 +4,8 @@ import { PublishProductCommand } from './publish-product.command.js';
 import {
   Product,
   ProductStatus,
+  Price,
+  SkuAttributes,
   CatalogDomainException,
 } from '../../domain/index.js';
 import { CatalogErrorCodes } from '@/core/index.js';
@@ -26,8 +28,8 @@ describe('PublishProductHandler', () => {
       'prod_1',
     );
     product.addSku({
-      price: 100,
-      attributes: { color: 'red' },
+      price: Price.create(100),
+      attributes: SkuAttributes.create({ color: 'red' }),
       skuCode: 'SKU-1',
     });
 

@@ -1,7 +1,7 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject, Logger } from '@nestjs/common';
 import { UpdateSkuPriceCommand } from './update-sku-price.command.js';
-import { Product, CatalogDomainException } from '../../domain/index.js';
+import { Product, Price, CatalogDomainException } from '../../domain/index.js';
 import type { IProductRepository } from '../../domain/index.js';
 import { CatalogErrorCodes } from '@/core/index.js';
 
@@ -27,7 +27,7 @@ export class UpdateSkuPriceHandler implements ICommandHandler<UpdateSkuPriceComm
       );
     }
 
-    product.updateSkuPrice(command.skuId, command.price);
+    product.updateSkuPrice(command.skuId, Price.create(command.price));
 
     await this.productRepo.save(product);
     this.logger.log(

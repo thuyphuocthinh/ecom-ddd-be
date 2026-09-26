@@ -20,8 +20,8 @@ export class ProductMapper {
         return {
           id: sku.id,
           skuCode: skuProps.skuCode,
-          price: skuProps.price,
-          attributes: skuProps.attributes,
+          price: skuProps.price.amount,
+          attributes: skuProps.attributes.toPlainObject(),
         } as SkuResponseDto;
       }),
       createdAt: entity.createdAt,

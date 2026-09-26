@@ -1,29 +1,27 @@
-import { Entity, CatalogErrorCodes } from '@/core/index.js';
-import { CatalogDomainException } from '../exceptions/catalog.exception.js';
+import { Entity } from '@/core/index.js';
+import { Price } from '../value-objects/price.vo.js';
+import { SkuAttributes } from '../value-objects/sku-attributes.vo.js';
 
 export interface SkuProps {
   productId: string;
-  price: number;
-  attributes: Record<string, string>; // e.g., { color: 'Red', size: 'M' }
+  price: Price;
+  attributes: SkuAttributes;
   skuCode: string;
   barcode?: string | null;
 }
 
 export class Sku extends Entity<SkuProps> {
   static create(props: SkuProps, id?: string): Sku {
-    if (props.price < 0) {
-      throw new CatalogDomainException(CatalogErrorCodes.NEGATIVE_PRICE);
-    }
     return new Sku(props, id);
   }
 
   get productId(): string {
     return this.props.productId;
   }
-  get price(): number {
+  get price(): Price {
     return this.props.price;
   }
-  get attributes(): Record<string, string> {
+  get attributes(): SkuAttributes {
     return this.props.attributes;
   }
   get skuCode(): string {
@@ -33,26 +31,13 @@ export class Sku extends Entity<SkuProps> {
     return this.props.barcode;
   }
 
-  updatePrice(newPrice: number): void {
-    if (newPrice < 0) {
-      throw new CatalogDomainException(CatalogErrorCodes.NEGATIVE_PRICE);
-    }
+  updatePrice(newPrice: Price): void {
     this.props.price = newPrice;
     this.updatedAt = new Date();
   }
 
-  // Helper function to check if this SKU has exactly the same attributes as another
-  hasSameAttributes(otherAttributes: Record<string, string>): boolean {
-    const keys1 = Object.keys(this.props.attributes);
-    const keys2 = Object.keys(otherAttributes);
-
-    if (keys1.length !== keys2.length) return false;
-
-    for (const key of keys1) {
-      if (this.props.attributes[key] !== otherAttributes[key]) {
-        return false;
-      }
-    }
-    return true;
+  // Helper to check if this SKU has exactly the same attributes as another
+  hasSameAttributes(otherAttributes: SkuAttributes): boolean {
+    return this.props.attributes.equals(otherAttributes);
   }
 }
