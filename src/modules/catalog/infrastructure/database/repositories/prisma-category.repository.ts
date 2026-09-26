@@ -77,6 +77,14 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     return count > 0;
   }
 
+  async hasChildren(id: string): Promise<boolean> {
+    this.logger.debug(`Checking if category has children: ${id}`);
+    const count = await this.prisma.category.count({
+      where: { parentId: id },
+    });
+    return count > 0;
+  }
+
   async delete(id: string): Promise<void> {
     this.logger.debug(`Deleting category: ${id}`);
     await this.prisma.category.delete({

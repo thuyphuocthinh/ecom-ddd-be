@@ -12,14 +12,16 @@ describe('DeleteCategoryHandler', () => {
     categoryRepo = {
       findById: vi.fn(),
       hasProducts: vi.fn(),
+      hasChildren: vi.fn(),
       delete: vi.fn(),
     };
     handler = new DeleteCategoryHandler(categoryRepo);
   });
 
-  it('should delete category successfully if it has no products', async () => {
+  it('should delete category successfully if it has no products or children', async () => {
     const category = Category.create('Electronics', null, 'cat_1');
     categoryRepo.findById.mockResolvedValue(category);
+    categoryRepo.hasChildren.mockResolvedValue(false);
     categoryRepo.hasProducts.mockResolvedValue(false);
     categoryRepo.delete.mockResolvedValue(undefined);
 
@@ -27,6 +29,7 @@ describe('DeleteCategoryHandler', () => {
     await expect(handler.execute(command)).resolves.toBeUndefined();
 
     expect(categoryRepo.findById).toHaveBeenCalledWith('cat_1');
+    expect(categoryRepo.hasChildren).toHaveBeenCalledWith('cat_1');
     expect(categoryRepo.hasProducts).toHaveBeenCalledWith('cat_1');
     expect(categoryRepo.delete).toHaveBeenCalledWith('cat_1');
   });
@@ -46,6 +49,7 @@ describe('DeleteCategoryHandler', () => {
   it('should throw exception if category has products', async () => {
     const category = Category.create('Electronics', null, 'cat_1');
     categoryRepo.findById.mockResolvedValue(category);
+    categoryRepo.hasChildren.mockResolvedValue(false);
     categoryRepo.hasProducts.mockResolvedValue(true);
 
     const command = new DeleteCategoryCommand('cat_1');
@@ -56,6 +60,23 @@ describe('DeleteCategoryHandler', () => {
       code: CatalogErrorCodes.CATEGORY_HAS_PRODUCTS.code,
     });
 
+    expect(categoryRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('should throw exception if category has child categories', async () => {
+    const category = Category.create('Electronics', null, 'cat_1');
+    categoryRepo.findById.mockResolvedValue(category);
+    categoryRepo.hasChildren.mockResolvedValue(true);
+
+    const command = new DeleteCategoryCommand('cat_1');
+    await expect(handler.execute(command)).rejects.toThrow(
+      CatalogDomainException,
+    );
+    await expect(handler.execute(command)).rejects.toMatchObject({
+      code: CatalogErrorCodes.CATEGORY_HAS_CHILD_CATEGORIES.code,
+    });
+
+    expect(categoryRepo.hasProducts).not.toHaveBeenCalled();
     expect(categoryRepo.delete).not.toHaveBeenCalled();
   });
 });

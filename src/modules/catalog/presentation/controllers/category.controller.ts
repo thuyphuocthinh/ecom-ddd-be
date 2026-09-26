@@ -117,7 +117,8 @@ export class CategoryController {
   @ApiResponse({ status: 204, description: 'Category deleted successfully' })
   @ApiResponse({
     status: 400,
-    description: 'Cannot delete category containing products',
+    description:
+      'Cannot delete category containing products or child categories',
   })
   @ApiResponse({ status: 404, description: 'Category not found' })
   async deleteCategory(@Param('id') id: string) {

@@ -32,6 +32,9 @@ export interface ICategoryRepository {
   // Check if category has any products (useful before deletion)
   hasProducts(id: string): Promise<boolean>;
 
+  // Check if category has any direct child categories (useful before deletion)
+  hasChildren(id: string): Promise<boolean>;
+
   // Delete a category
   delete(id: string): Promise<void>;
 }

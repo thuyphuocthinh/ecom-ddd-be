@@ -24,6 +24,13 @@ export class DeleteCategoryHandler implements ICommandHandler<DeleteCategoryComm
       );
     }
 
+    const hasChildren = await this.categoryRepo.hasChildren(command.id);
+    if (hasChildren) {
+      throw new CatalogDomainException(
+        CatalogErrorCodes.CATEGORY_HAS_CHILD_CATEGORIES,
+      );
+    }
+
     const hasProducts = await this.categoryRepo.hasProducts(command.id);
     if (hasProducts) {
       throw new CatalogDomainException(CatalogErrorCodes.CATEGORY_HAS_PRODUCTS);

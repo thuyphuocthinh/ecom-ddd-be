@@ -51,4 +51,8 @@ export const CatalogErrorCodes = {
     message: 'Cannot delete category containing products',
   },
   SKU_NOT_FOUND: { code: 'CAT-012', message: 'SKU not found' },
+  CATEGORY_HAS_CHILD_CATEGORIES: {
+    code: 'CAT-013',
+    message: 'Cannot delete category containing child categories',
+  },
 };
