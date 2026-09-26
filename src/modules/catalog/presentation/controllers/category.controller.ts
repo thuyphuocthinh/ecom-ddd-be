@@ -5,6 +5,7 @@ import {
   Get,
   Query,
   Param,
+  Headers,
   HttpCode,
   HttpStatus,
   Delete,
@@ -17,6 +18,7 @@ import {
   ApiResponse,
   ApiParam,
   ApiQuery,
+  ApiHeader,
 } from '@nestjs/swagger';
 import { CreateCategoryDto } from '../dtos/create-category.dto.js';
 import { MoveCategoryDto } from '../dtos/move-category.dto.js';
@@ -31,6 +33,7 @@ import {
   GetCategoryByIdQuery,
 } from '../../application/index.js';
 import { Category } from '../../domain/index.js';
+import { IdempotencyService } from '@/core/index.js';
 
 @ApiTags('Catalog - Categories')
 @Controller('catalog/categories')
@@ -38,20 +41,36 @@ export class CategoryController {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
+    private readonly idempotencyService: IdempotencyService,
   ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new category' })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'Optional client-generated key. Retrying the same key within 24h replays the original response instead of creating a duplicate category.',
+  })
   @ApiResponse({ status: 201, description: 'Category created successfully' })
   @ApiResponse({ status: 400, description: 'Bad Request' })
-  async createCategory(@Body() dto: CreateCategoryDto) {
-    const command = new CreateCategoryCommand(dto.name, dto.parentId);
-    const category = await this.commandBus.execute<
-      CreateCategoryCommand,
-      Category
-    >(command);
-    return CategoryMapper.toResponse(category);
+  @ApiResponse({
+    status: 409,
+    description: 'A request with this Idempotency-Key is already in progress',
+  })
+  async createCategory(
+    @Body() dto: CreateCategoryDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.idempotencyService.execute(idempotencyKey, async () => {
+      const command = new CreateCategoryCommand(dto.name, dto.parentId);
+      const category = await this.commandBus.execute<
+        CreateCategoryCommand,
+        Category
+      >(command);
+      return CategoryMapper.toResponse(category);
+    });
   }
 
   @Get()
@@ -116,7 +135,7 @@ export class CategoryController {
   @ApiParam({ name: 'id', description: 'Category ID' })
   @ApiResponse({ status: 204, description: 'Category deleted successfully' })
   @ApiResponse({
-    status: 400,
+    status: 409,
     description:
       'Cannot delete category containing products or child categories',
   })

@@ -5,6 +5,7 @@ import {
   Get,
   Query,
   Param,
+  Headers,
   HttpCode,
   HttpStatus,
   Delete,
@@ -16,9 +17,11 @@ import {
   ApiOperation,
   ApiResponse,
   ApiParam,
+  ApiHeader,
   ApiExtraModels,
   getSchemaPath,
 } from '@nestjs/swagger';
+import { IdempotencyService } from '@/core/index.js';
 import { CreateProductDto } from '../dtos/create-product.dto.js';
 import { GetProductsDto } from '../dtos/get-products.dto.js';
 import { UpdateProductDto } from '../dtos/update-product.dto.js';
@@ -47,27 +50,43 @@ export class ProductController {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
+    private readonly idempotencyService: IdempotencyService,
   ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new product' })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'Optional client-generated key. Retrying the same key within 24h replays the original response instead of creating a duplicate product.',
+  })
   @ApiResponse({ status: 201, description: 'Product created successfully' })
   @ApiResponse({ status: 400, description: 'Bad Request / Validation Error' })
-  async createProduct(@Body() dto: CreateProductDto) {
-    const command = new CreateProductCommand(
-      dto.categoryId,
-      dto.name,
-      dto.description,
-      dto.thumbnail,
-      dto.skus,
-    );
+  @ApiResponse({
+    status: 409,
+    description: 'A request with this Idempotency-Key is already in progress',
+  })
+  async createProduct(
+    @Body() dto: CreateProductDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.idempotencyService.execute(idempotencyKey, async () => {
+      const command = new CreateProductCommand(
+        dto.categoryId,
+        dto.name,
+        dto.description,
+        dto.thumbnail,
+        dto.skus,
+      );
 
-    const product = await this.commandBus.execute<
-      CreateProductCommand,
-      Product
-    >(command);
-    return ProductMapper.toResponse(product);
+      const product = await this.commandBus.execute<
+        CreateProductCommand,
+        Product
+      >(command);
+      return ProductMapper.toResponse(product);
+    });
   }
 
   @Patch(':id')
@@ -197,8 +216,8 @@ export class ProductController {
     return {
       id: sku.id,
       skuCode: sku.skuCode,
-      price: sku.price,
-      attributes: sku.attributes,
+      price: sku.price.amount,
+      attributes: sku.attributes.toPlainObject(),
       barcode: sku.barcode,
     };
   }

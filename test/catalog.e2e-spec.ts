@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from './../src/app.module.js';
-import { PrismaService } from './../src/core/database/prisma.service.js';
-import { AllExceptionsFilter } from './../src/core/filters/all-exceptions.filter.js';
+import {
+  PrismaService,
+  AllExceptionsFilter,
+  ResponseInterceptor,
+} from './../src/core/index.js';
 import { ClsService } from 'nestjs-cls';
-import { ResponseInterceptor } from './../src/core/interceptors/response.interceptor.js';
 
 describe('CatalogController (e2e)', () => {
   let app: INestApplication;
@@ -52,6 +54,32 @@ describe('CatalogController (e2e)', () => {
       expect(res.body.data).toHaveProperty('id');
       expect(res.body.data.name).toBe('Electronics');
       expect(res.body.data.path).toContain('/');
+    });
+
+    it('should replay the same response on a repeated Idempotency-Key instead of creating a duplicate', async () => {
+      const idempotencyKey = `test-key-${Date.now()}`;
+
+      const first = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .set('Idempotency-Key', idempotencyKey)
+        .send({ name: 'Books' })
+        .expect(201);
+
+      const second = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .set('Idempotency-Key', idempotencyKey)
+        .send({ name: 'Books' })
+        .expect(201);
+
+      expect(second.body.data.id).toBe(first.body.data.id);
+
+      const all = await request(app.getHttpServer()).get(
+        '/api/v1/catalog/categories',
+      );
+      const matching = all.body.data.filter(
+        (c: { name: string }) => c.name === 'Books',
+      );
+      expect(matching).toHaveLength(1);
     });
   });
 
