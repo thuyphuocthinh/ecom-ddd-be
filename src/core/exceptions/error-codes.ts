@@ -50,4 +50,5 @@ export const CatalogErrorCodes = {
     code: 'CAT-011',
     message: 'Cannot delete category containing products',
   },
+  SKU_NOT_FOUND: { code: 'CAT-012', message: 'SKU not found' },
 };

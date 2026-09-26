@@ -19,10 +19,14 @@ export class GetProductsHandler implements IQueryHandler<GetProductsQuery> {
     this.logger.log(
       `Executing GetProductsQuery (limit: ${query.limit}, cursor: ${query.cursor})`,
     );
-    return this.productRepo.findList(
-      query.cursor,
-      query.limit,
-      query.categoryId,
-    );
+    return this.productRepo.findList({
+      limit: query.limit,
+      cursor: query.cursor,
+      categoryId: query.categoryId,
+      search: query.search,
+      status: query.status,
+      minPrice: query.minPrice,
+      maxPrice: query.maxPrice,
+    });
   }
 }

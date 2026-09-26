@@ -64,6 +64,27 @@ export class Product extends AggregateRoot<ProductProps> {
     return newSku;
   }
 
+  public removeSku(skuId: string): void {
+    const initialLength = this.props.skus.length;
+    this.props.skus = this.props.skus.filter((sku) => sku.id !== skuId);
+
+    if (this.props.skus.length === initialLength) {
+      throw new CatalogDomainException(CatalogErrorCodes.SKU_NOT_FOUND);
+    }
+
+    this.updatedAt = new Date();
+  }
+
+  public updateSkuPrice(skuId: string, newPrice: number): void {
+    const sku = this.props.skus.find((s) => s.id === skuId);
+    if (!sku) {
+      throw new CatalogDomainException(CatalogErrorCodes.SKU_NOT_FOUND);
+    }
+
+    sku.updatePrice(newPrice);
+    this.updatedAt = new Date();
+  }
+
   public publish(): void {
     if (this.props.skus.length === 0) {
       throw new CatalogDomainException(CatalogErrorCodes.INVALID_PUBLISH);
@@ -79,7 +100,22 @@ export class Product extends AggregateRoot<ProductProps> {
   }
 
   public unpublish(): void {
+    if (this.props.status !== ProductStatus.PUBLISHED) {
+      // Ignore if already not published
+      return;
+    }
     this.props.status = ProductStatus.DRAFT;
+    this.updatedAt = new Date();
+  }
+
+  public updateDetails(
+    name?: string,
+    description?: string,
+    thumbnail?: string,
+  ): void {
+    if (name) this.props.name = name;
+    if (description !== undefined) this.props.description = description;
+    if (thumbnail !== undefined) this.props.thumbnail = thumbnail;
     this.updatedAt = new Date();
   }
 }

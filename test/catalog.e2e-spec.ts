@@ -100,6 +100,66 @@ describe('CatalogController (e2e)', () => {
     });
   });
 
+  describe('/api/v1/catalog/products (GET with Filters)', () => {
+    it('should search products by name/description and filter by price/status', async () => {
+      const categoryRes = await request(app.getHttpServer())
+        .post('/api/v1/catalog/categories')
+        .send({ name: 'Laptops' });
+      const categoryId = categoryRes.body.data.id;
+
+      // Product 1 (MacBook - $1999) - Published
+      const p1 = await request(app.getHttpServer())
+        .post('/api/v1/catalog/products')
+        .send({
+          categoryId,
+          name: 'MacBook Pro',
+          description: 'Apple Laptop M3',
+          skus: [{ skuCode: 'MBP', price: 1999, attributes: {} }],
+        });
+      await request(app.getHttpServer())
+        .patch(`/api/v1/catalog/products/${p1.body.data.id}/publish`)
+        .expect(200);
+
+      // Product 2 (Dell - $999) - Draft
+      await request(app.getHttpServer())
+        .post('/api/v1/catalog/products')
+        .send({
+          categoryId,
+          name: 'Dell XPS',
+          description: 'Windows Laptop',
+          skus: [{ skuCode: 'DELL', price: 999, attributes: {} }],
+        });
+
+      // Search 'apple' (description match)
+      let res = await request(app.getHttpServer())
+        .get('/api/v1/catalog/products?search=apple')
+        .expect(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].name).toBe('MacBook Pro');
+
+      // Filter status PUBLISHED
+      res = await request(app.getHttpServer())
+        .get('/api/v1/catalog/products?status=PUBLISHED')
+        .expect(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].name).toBe('MacBook Pro');
+
+      // Filter minPrice 1000
+      res = await request(app.getHttpServer())
+        .get('/api/v1/catalog/products?minPrice=1000')
+        .expect(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].name).toBe('MacBook Pro');
+
+      // Filter maxPrice 1000
+      res = await request(app.getHttpServer())
+        .get('/api/v1/catalog/products?maxPrice=1000')
+        .expect(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].name).toBe('Dell XPS');
+    });
+  });
+
   describe('/api/v1/catalog/categories/:id (DELETE)', () => {
     it('should delete a category with no products', async () => {
       const categoryRes = await request(app.getHttpServer())

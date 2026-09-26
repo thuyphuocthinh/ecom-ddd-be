@@ -15,6 +15,11 @@ import {
   DeleteCategoryHandler,
   MoveCategoryHandler,
   PublishProductHandler,
+  UnpublishProductHandler,
+  UpdateProductHandler,
+  AddSkuHandler,
+  RemoveSkuHandler,
+  UpdateSkuPriceHandler,
 } from './application/index.js';
 
 // Repositories
@@ -29,6 +34,11 @@ const CommandHandlers = [
   DeleteCategoryHandler,
   MoveCategoryHandler,
   PublishProductHandler,
+  UnpublishProductHandler,
+  UpdateProductHandler,
+  AddSkuHandler,
+  RemoveSkuHandler,
+  UpdateSkuPriceHandler,
 ];
 const QueryHandlers = [
   GetProductsHandler,

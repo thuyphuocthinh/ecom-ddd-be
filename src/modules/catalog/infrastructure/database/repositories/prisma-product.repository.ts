@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { IProductRepository, Product } from '../../../domain/index.js';
 import { PrismaService, PaginatedResult } from '@/core/index.js';
+import { FindProductsParams } from '../../../domain/repositories/catalog.repository.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
 
 @Injectable()
@@ -28,7 +29,6 @@ export class PrismaProductRepository implements IProductRepository {
       .getProps()
       .skus.map((sku) => CatalogMapper.toSkuPersistence(sku));
 
-    // Dùng Transaction để lưu cả SPU (Product) và các SKU cùng lúc
     await this.prisma.$transaction(async (tx) => {
       // 1. Upsert Product
       await tx.product.upsert({
@@ -37,16 +37,41 @@ export class PrismaProductRepository implements IProductRepository {
         update: productData,
       });
 
-      // 2. Đồng bộ SKUs (Xóa SKU cũ không còn trong danh sách và upsert SKU mới)
-      // Để an toàn, xóa tất cả SKU cũ của product này rồi insert lại
-      // (Trong thực tế có thể dùng logic update từng cái để tối ưu hơn)
-      await tx.sku.deleteMany({
+      // 2. Fetch existing SKUs to calculate diff
+      const existingSkus = await tx.sku.findMany({
         where: { productId: product.id },
+        select: { id: true },
       });
+      const existingSkuIds = existingSkus.map((s) => s.id);
+      const newSkuIds = skusData.map((s) => s.id);
 
-      if (skusData.length > 0) {
+      const skusToDelete = existingSkuIds.filter(
+        (id) => !newSkuIds.includes(id),
+      );
+      const skusToCreate = skusData.filter(
+        (s) => !existingSkuIds.includes(s.id),
+      );
+      const skusToUpdate = skusData.filter((s) =>
+        existingSkuIds.includes(s.id),
+      );
+
+      // 3. Apply SKU diffs
+      if (skusToDelete.length > 0) {
+        await tx.sku.deleteMany({
+          where: { id: { in: skusToDelete } },
+        });
+      }
+
+      if (skusToCreate.length > 0) {
         await tx.sku.createMany({
-          data: skusData as Prisma.SkuCreateManyInput[],
+          data: skusToCreate as Prisma.SkuCreateManyInput[],
+        });
+      }
+
+      for (const sku of skusToUpdate) {
+        await tx.sku.update({
+          where: { id: sku.id },
+          data: sku as Prisma.SkuUpdateInput,
         });
       }
 
@@ -56,20 +81,48 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async findList(
-    cursor?: string,
-    limit: number = 20,
-    categoryId?: string,
+    params: FindProductsParams,
   ): Promise<PaginatedResult<Product>> {
+    const { limit, cursor, categoryId, search, status, minPrice, maxPrice } =
+      params;
     this.logger.debug(
-      `Finding product list (limit: ${limit}, cursor: ${cursor}, categoryId: ${categoryId})`,
+      `Finding product list (limit: ${limit}, cursor: ${cursor}, search: ${search}, categoryId: ${categoryId})`,
     );
     const take = limit + 1; // Limit + 1 trick
+
+    const where: Prisma.ProductWhereInput = {};
+
+    if (categoryId) {
+      where.categoryId = categoryId;
+    }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      where.skus = {
+        some: {
+          price: {
+            ...(minPrice !== undefined && { gte: minPrice }),
+            ...(maxPrice !== undefined && { lte: maxPrice }),
+          },
+        },
+      };
+    }
 
     const products = await this.prisma.product.findMany({
       take,
       skip: cursor ? 1 : 0, // Bỏ qua phần tử cursor hiện tại
       cursor: cursor ? { id: cursor } : undefined,
-      where: categoryId ? { categoryId } : undefined,
+      where,
       include: { skus: true },
       orderBy: { id: 'asc' }, // Keyset pagination luôn cần order by index
     });
