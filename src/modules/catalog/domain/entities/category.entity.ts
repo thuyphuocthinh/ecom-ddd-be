@@ -1,4 +1,4 @@
-import { Entity, CatalogErrorCodes } from '@/core/index.js';
+import { Entity, CatalogErrorCodes, snowflake } from '@/core/index.js';
 import { CatalogDomainException } from '../exceptions/catalog.exception.js';
 
 export interface CategoryProps {
@@ -14,9 +14,10 @@ export class Category extends Entity<CategoryProps> {
   static create(
     name: string,
     parentCategory: Category | null,
-    id: string,
+    id?: string,
   ): Category {
-    let path = `/${id}/`;
+    const categoryId = id || snowflake.nextId();
+    let path = `/${categoryId}/`;
 
     if (parentCategory) {
       // Tính toán độ sâu (đếm số dấu gạch chéo trừ đi 1)
@@ -24,7 +25,7 @@ export class Category extends Entity<CategoryProps> {
       if (depth >= Category.MAX_DEPTH) {
         throw new CatalogDomainException(CatalogErrorCodes.MAX_DEPTH_EXCEEDED);
       }
-      path = `${parentCategory.path}${id}/`;
+      path = `${parentCategory.path}${categoryId}/`;
     }
 
     return new Category(
@@ -34,7 +35,7 @@ export class Category extends Entity<CategoryProps> {
         path,
         isActive: true,
       },
-      id,
+      categoryId,
     );
   }
 

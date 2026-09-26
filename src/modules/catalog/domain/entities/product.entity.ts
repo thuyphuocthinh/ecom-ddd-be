@@ -1,4 +1,4 @@
-import { AggregateRoot, snowflake, CatalogErrorCodes } from '@/core/index.js';
+import { AggregateRoot, CatalogErrorCodes } from '@/core/index.js';
 import { CatalogDomainException } from '../exceptions/catalog.exception.js';
 import { Sku, SkuProps } from './sku.entity.js';
 
@@ -56,10 +56,7 @@ export class Product extends AggregateRoot<ProductProps> {
       throw new CatalogDomainException(CatalogErrorCodes.SKU_DUPLICATED);
     }
 
-    const newSku = Sku.create(
-      { ...props, productId: this.id },
-      skuId || snowflake.nextId(),
-    );
+    const newSku = Sku.create({ ...props, productId: this.id }, skuId);
 
     this.props.skus.push(newSku);
     this.updatedAt = new Date();

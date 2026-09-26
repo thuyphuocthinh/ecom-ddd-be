@@ -4,7 +4,6 @@ import { CreateCategoryCommand } from './create-category.command.js';
 import { Category, CatalogDomainException } from '../../domain/index.js';
 import type { ICategoryRepository } from '../../domain/index.js';
 import { CatalogErrorCodes } from '@/core/index.js';
-import { snowflake } from '@/core/index.js';
 
 @CommandHandler(CreateCategoryCommand)
 export class CreateCategoryHandler implements ICommandHandler<CreateCategoryCommand> {
@@ -31,8 +30,7 @@ export class CreateCategoryHandler implements ICommandHandler<CreateCategoryComm
       }
     }
 
-    const categoryId = snowflake.nextId();
-    const category = Category.create(command.name, parentCategory, categoryId);
+    const category = Category.create(command.name, parentCategory);
 
     await this.categoryRepo.save(category);
     this.logger.log(`Successfully created category with ID: ${category.id}`);

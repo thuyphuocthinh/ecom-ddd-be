@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { snowflake } from '../../utils/snowflake.util.js';
 
 export abstract class Entity<EntityProps> {
   protected readonly _id: string;
@@ -7,7 +7,7 @@ export abstract class Entity<EntityProps> {
   public updatedAt: Date;
 
   constructor(props: EntityProps, id?: string) {
-    this._id = id ? id : randomUUID();
+    this._id = id ? id : snowflake.nextId();
     this.createdAt = new Date();
     this.updatedAt = new Date();
     this.props = props;
