@@ -10,6 +10,8 @@ import {
   Product,
   ProductStatus,
   Sku,
+  Price,
+  SkuAttributes,
 } from '../../../domain/index.js';
 
 type MutableEntity<T> = {
@@ -36,10 +38,12 @@ export class CatalogMapper {
       prismaCategory.id,
     );
 
-    // Hydrate read-only fields safely
+    // Hydrate read-only fields safely. Wrapped in `new Date(...)` so this
+    // also works when prismaCategory came back from the Redis cache as
+    // plain JSON (dates arrive as ISO strings there, not Date instances).
     const mutableCategory = category as MutableEntity<Category>;
-    mutableCategory.createdAt = prismaCategory.createdAt;
-    mutableCategory.updatedAt = prismaCategory.updatedAt;
+    mutableCategory.createdAt = new Date(prismaCategory.createdAt);
+    mutableCategory.updatedAt = new Date(prismaCategory.updatedAt);
 
     return category;
   }
@@ -77,13 +81,15 @@ export class CatalogMapper {
         thumbnail: prismaProduct.thumbnail,
         status: statusMap[prismaProduct.status],
         skus,
+        version: prismaProduct.version,
       },
       prismaProduct.id,
     );
 
+    // Same JSON-cache-safety note as toCategoryDomain above.
     const mutableProduct = product as MutableEntity<Product>;
-    mutableProduct.createdAt = prismaProduct.createdAt;
-    mutableProduct.updatedAt = prismaProduct.updatedAt;
+    mutableProduct.createdAt = new Date(prismaProduct.createdAt);
+    mutableProduct.updatedAt = new Date(prismaProduct.updatedAt);
 
     return product;
   }
@@ -104,6 +110,7 @@ export class CatalogMapper {
       description: product.getProps().description || null,
       thumbnail: product.getProps().thumbnail || null,
       status: statusMap[product.status],
+      version: product.version,
     };
   }
 
@@ -111,8 +118,10 @@ export class CatalogMapper {
     const sku = new Sku(
       {
         productId: prismaSku.productId,
-        price: Number(prismaSku.price), // Convert Decimal object to Number
-        attributes: prismaSku.attributes as Record<string, string>,
+        price: Price.fromDecimal(prismaSku.price),
+        attributes: SkuAttributes.create(
+          prismaSku.attributes as Record<string, string>,
+        ),
         skuCode: prismaSku.skuCode,
         barcode: prismaSku.barcode,
       },
@@ -120,8 +129,8 @@ export class CatalogMapper {
     );
 
     const mutableSku = sku as MutableEntity<Sku>;
-    mutableSku.createdAt = prismaSku.createdAt;
-    mutableSku.updatedAt = prismaSku.updatedAt;
+    mutableSku.createdAt = new Date(prismaSku.createdAt);
+    mutableSku.updatedAt = new Date(prismaSku.updatedAt);
 
     return sku;
   }
@@ -132,8 +141,8 @@ export class CatalogMapper {
     return {
       id: sku.id,
       productId: sku.productId,
-      price: new Prisma.Decimal(sku.price), // Strictly typed Decimal
-      attributes: sku.attributes as Prisma.JsonObject, // Strictly typed Json
+      price: new Prisma.Decimal(sku.price.amount), // Strictly typed Decimal
+      attributes: sku.attributes.toPlainObject() as Prisma.JsonObject,
       skuCode: sku.skuCode,
       barcode: sku.barcode || null,
     };

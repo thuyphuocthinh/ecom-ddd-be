@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Product, ProductStatus } from './product.entity.js';
+import { Price } from '../value-objects/price.vo.js';
+import { SkuAttributes } from '../value-objects/sku-attributes.vo.js';
 import { CatalogDomainException } from '../exceptions/catalog.exception.js';
 import { CatalogErrorCodes } from '@/core/index.js';
 
@@ -20,28 +22,31 @@ describe('Product Entity', () => {
   it('should add a new SKU successfully', () => {
     const product = Product.create({ categoryId: 'cat_1', name: 'Test' });
     product.addSku({
-      price: 100000,
-      attributes: { color: 'Red', size: 'M' },
+      price: Price.create(100000),
+      attributes: SkuAttributes.create({ color: 'Red', size: 'M' }),
       skuCode: 'TEST-RED-M',
     });
 
     expect(product.skus.length).toBe(1);
-    expect(product.skus[0].price).toBe(100000);
-    expect(product.skus[0].attributes).toEqual({ color: 'Red', size: 'M' });
+    expect(product.skus[0].price.amount).toBe(100000);
+    expect(product.skus[0].attributes.toPlainObject()).toEqual({
+      color: 'Red',
+      size: 'M',
+    });
   });
 
   it('should throw an exception when adding duplicated SKUs', () => {
     const product = Product.create({ categoryId: 'cat_1', name: 'Test' });
     product.addSku({
-      price: 100000,
-      attributes: { color: 'Red', size: 'M' },
+      price: Price.create(100000),
+      attributes: SkuAttributes.create({ color: 'Red', size: 'M' }),
       skuCode: 'TEST-RED-M',
     });
 
     expect(() => {
       product.addSku({
-        price: 120000,
-        attributes: { size: 'M', color: 'Red' }, // Same attributes, different order
+        price: Price.create(120000),
+        attributes: SkuAttributes.create({ size: 'M', color: 'Red' }), // Same attributes, different order
         skuCode: 'TEST-RED-M-2',
       });
     }).toThrowError(
@@ -52,13 +57,13 @@ describe('Product Entity', () => {
   it('should track removed SKU ids without touching untouched SKUs', () => {
     const product = Product.create({ categoryId: 'cat_1', name: 'Test' });
     const skuA = product.addSku({
-      price: 100000,
-      attributes: { color: 'Red' },
+      price: Price.create(100000),
+      attributes: SkuAttributes.create({ color: 'Red' }),
       skuCode: 'A',
     });
     product.addSku({
-      price: 100000,
-      attributes: { color: 'Blue' },
+      price: Price.create(100000),
+      attributes: SkuAttributes.create({ color: 'Blue' }),
       skuCode: 'B',
     });
 

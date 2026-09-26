@@ -1,6 +1,7 @@
 import { AggregateRoot, CatalogErrorCodes } from '@/core/index.js';
 import { CatalogDomainException } from '../exceptions/catalog.exception.js';
 import { Sku, SkuProps } from './sku.entity.js';
+import { Price } from '../value-objects/price.vo.js';
 
 export enum ProductStatus {
   DRAFT = 'DRAFT',
@@ -15,6 +16,10 @@ export interface ProductProps {
   thumbnail?: string | null;
   status: ProductStatus;
   skus: Sku[]; // Danh sách biến thể
+  // Optimistic concurrency token. Mutating methods below don't bump this —
+  // the repository increments it on a successful save, so it always
+  // reflects the row version this in-memory instance was loaded from.
+  version: number;
 }
 
 export class Product extends AggregateRoot<ProductProps> {
@@ -29,7 +34,7 @@ export class Product extends AggregateRoot<ProductProps> {
   }
 
   static create(
-    props: Omit<ProductProps, 'status' | 'skus'>,
+    props: Omit<ProductProps, 'status' | 'skus' | 'version'>,
     id?: string,
   ): Product {
     const product = new Product(
@@ -37,6 +42,7 @@ export class Product extends AggregateRoot<ProductProps> {
         ...props,
         status: ProductStatus.DRAFT, // Mặc định luôn là DRAFT
         skus: [],
+        version: 1,
       },
       id,
     );
@@ -55,6 +61,9 @@ export class Product extends AggregateRoot<ProductProps> {
   }
   get skus(): Sku[] {
     return [...this.props.skus];
+  }
+  get version(): number {
+    return this.props.version;
   }
 
   public addSku(props: Omit<SkuProps, 'productId'>, skuId?: string): Sku {
@@ -86,7 +95,7 @@ export class Product extends AggregateRoot<ProductProps> {
     this.updatedAt = new Date();
   }
 
-  public updateSkuPrice(skuId: string, newPrice: number): void {
+  public updateSkuPrice(skuId: string, newPrice: Price): void {
     const sku = this.props.skus.find((s) => s.id === skuId);
     if (!sku) {
       throw new CatalogDomainException(CatalogErrorCodes.SKU_NOT_FOUND);
@@ -101,7 +110,9 @@ export class Product extends AggregateRoot<ProductProps> {
       throw new CatalogDomainException(CatalogErrorCodes.INVALID_PUBLISH);
     }
 
-    const hasInvalidPrice = this.props.skus.some((sku) => sku.price <= 0);
+    const hasInvalidPrice = this.props.skus.some(
+      (sku) => sku.price.amount <= 0,
+    );
     if (hasInvalidPrice) {
       throw new CatalogDomainException(CatalogErrorCodes.INVALID_SKU_PRICE);
     }

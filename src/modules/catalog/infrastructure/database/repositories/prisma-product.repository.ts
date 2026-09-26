@@ -1,41 +1,83 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { IProductRepository, Product } from '../../../domain/index.js';
-import { PrismaService, PaginatedResult } from '@/core/index.js';
+import {
+  IProductRepository,
+  Product,
+  CatalogDomainException,
+} from '../../../domain/index.js';
+import {
+  PrismaService,
+  PaginatedResult,
+  CatalogErrorCodes,
+  RedisService,
+} from '@/core/index.js';
 import { FindProductsParams } from '../../../domain/repositories/catalog.repository.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
+
+const PRODUCT_CACHE_TTL_SECONDS = 300;
+const productCacheKey = (id: string) => `catalog:product:${id}`;
 
 @Injectable()
 export class PrismaProductRepository implements IProductRepository {
   private readonly logger = new Logger(PrismaProductRepository.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async findById(id: string): Promise<Product | null> {
-    this.logger.debug(`Finding product by ID: ${id}`);
-    const product = await this.prisma.product.findUnique({
-      where: { id },
-      include: { skus: true }, // Luôn load kèm SKU để tạo thành 1 Aggregate Root hoàn chỉnh
-    });
+    const cached = await this.redis.getOrSetNullableDetail(
+      productCacheKey(id),
+      PRODUCT_CACHE_TTL_SECONDS,
+      async () => {
+        this.logger.debug(`Finding product by ID: ${id}`);
+        // Luôn load kèm SKU để tạo thành 1 Aggregate Root hoàn chỉnh
+        return this.prisma.product.findUnique({
+          where: { id },
+          include: { skus: true },
+        });
+      },
+    );
 
-    if (!product) return null;
-    return CatalogMapper.toProductDomain(product);
+    // The cache stores the raw Prisma row (JSON-safe), never the domain
+    // entity itself, so every read — cache hit or miss — maps it fresh.
+    return cached ? CatalogMapper.toProductDomain(cached) : null;
   }
 
   async save(product: Product): Promise<void> {
     this.logger.debug(`Saving product: ${product.id}`);
     const productData = CatalogMapper.toProductPersistence(product);
+    const { id, version, ...updateFields } = productData;
     const skusData = product
       .getProps()
       .skus.map((sku) => CatalogMapper.toSkuPersistence(sku));
 
     await this.prisma.$transaction(async (tx) => {
-      // 1. Upsert Product
-      await tx.product.upsert({
-        where: { id: productData.id },
-        create: productData,
-        update: productData,
+      // 1. Optimistic-concurrency update: only succeeds if the row is still
+      // at the version this aggregate was loaded from.
+      const updateResult = await tx.product.updateMany({
+        where: { id, version },
+        data: { ...updateFields, version: { increment: 1 } },
       });
+
+      if (updateResult.count === 0) {
+        const existing = await tx.product.findUnique({
+          where: { id },
+          select: { id: true },
+        });
+
+        if (existing) {
+          // Row exists but the version didn't match: another request
+          // already saved a newer version between our read and this write.
+          throw new CatalogDomainException(
+            CatalogErrorCodes.CONCURRENCY_CONFLICT,
+          );
+        }
+
+        // Row doesn't exist yet — this is the first save for this aggregate.
+        await tx.product.create({ data: productData });
+      }
 
       // 2. Fetch existing SKUs to tell creates from updates
       const existingSkus = await tx.sku.findMany({
@@ -81,6 +123,8 @@ export class PrismaProductRepository implements IProductRepository {
       // Lưu Outbox Pattern Event nếu có (VD: ProductCreatedEvent)
       // Sẽ implement Outbox entity sau.
     });
+
+    await this.redis.invalidateDetail(productCacheKey(product.id));
   }
 
   async findList(
@@ -100,10 +144,17 @@ export class PrismaProductRepository implements IProductRepository {
     }
 
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
+      // Full-text match against the generated `searchVector` column + GIN
+      // index (prisma/sql/add_product_search_vector.sql) instead of
+      // `contains`/ILIKE, which can't use an index and doesn't scale past
+      // a small catalog. Prisma can't express this column, so the set of
+      // matching ids is fetched via raw SQL and intersected with the rest
+      // of the normal Prisma-driven filters/pagination below.
+      const matches = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Product"
+        WHERE "searchVector" @@ plainto_tsquery('simple', ${search});
+      `;
+      where.id = { in: matches.map((m) => m.id) };
     }
 
     if (status) {

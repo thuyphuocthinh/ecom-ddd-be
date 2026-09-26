@@ -103,4 +103,14 @@ export const CatalogErrorCodes = {
     message: 'Cannot delete category containing child categories',
     status: HttpStatus.CONFLICT,
   },
+  CONCURRENCY_CONFLICT: {
+    code: 'CAT-014',
+    message: 'Product was modified by another request, please retry',
+    status: HttpStatus.CONFLICT,
+  },
+  INVALID_SKU_ATTRIBUTES: {
+    code: 'CAT-015',
+    message: 'SKU attributes must be non-empty string key/value pairs',
+    status: HttpStatus.BAD_REQUEST,
+  },
 };

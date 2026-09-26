@@ -1,21 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ICategoryRepository, Category } from '../../../domain/index.js';
-import { PrismaService } from '@/core/index.js';
+import { PrismaService, RedisService } from '@/core/index.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
+
+const CATEGORY_CACHE_TTL_SECONDS = 300;
+const categoryCacheKey = (id: string) => `catalog:category:${id}`;
 
 @Injectable()
 export class PrismaCategoryRepository implements ICategoryRepository {
   private readonly logger = new Logger(PrismaCategoryRepository.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async findById(id: string): Promise<Category | null> {
-    this.logger.debug(`Finding category by ID: ${id}`);
-    const category = await this.prisma.category.findUnique({
-      where: { id },
-    });
-    if (!category) return null;
-    return CatalogMapper.toCategoryDomain(category);
+    const cached = await this.redis.getOrSetNullableDetail(
+      categoryCacheKey(id),
+      CATEGORY_CACHE_TTL_SECONDS,
+      async () => {
+        this.logger.debug(`Finding category by ID: ${id}`);
+        return this.prisma.category.findUnique({ where: { id } });
+      },
+    );
+    return cached ? CatalogMapper.toCategoryDomain(cached) : null;
   }
 
   async findByParentId(parentId: string | null): Promise<Category[]> {
@@ -35,6 +44,7 @@ export class PrismaCategoryRepository implements ICategoryRepository {
       create: data,
       update: data,
     });
+    await this.redis.invalidateDetail(categoryCacheKey(category.id));
   }
 
   async updatePathAndChildren(
@@ -48,7 +58,7 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     const newPath = category.path;
 
     // Use transaction to ensure data integrity during tree move
-    await this.prisma.$transaction(async (tx) => {
+    const affectedIds = await this.prisma.$transaction(async (tx) => {
       // 1. Update the category itself
       await tx.category.update({
         where: { id: data.id },
@@ -58,7 +68,15 @@ export class PrismaCategoryRepository implements ICategoryRepository {
         },
       });
 
-      // 2. Bulk update all descendants
+      // 2. Find every descendant this move will touch, so their cache
+      // entries can be invalidated too — the bulk path update below is a
+      // raw query and doesn't return which rows it affected.
+      const descendants = await tx.category.findMany({
+        where: { path: { startsWith: oldPath } },
+        select: { id: true },
+      });
+
+      // 3. Bulk update all descendants
       // We use raw query because Prisma doesn't support REPLACE function natively
       // Example: REPLACE('/old/path/', '/new/path/')
       await tx.$executeRaw`
@@ -66,7 +84,15 @@ export class PrismaCategoryRepository implements ICategoryRepository {
         SET "path" = REPLACE("path", ${oldPath}, ${newPath})
         WHERE "path" LIKE ${oldPath + '%'};
       `;
+
+      return [data.id, ...descendants.map((d) => d.id)];
     });
+
+    await Promise.all(
+      affectedIds.map((id) =>
+        this.redis.invalidateDetail(categoryCacheKey(id)),
+      ),
+    );
   }
 
   async hasProducts(id: string): Promise<boolean> {
@@ -90,5 +116,6 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     await this.prisma.category.delete({
       where: { id },
     });
+    await this.redis.invalidateDetail(categoryCacheKey(id));
   }
 }

@@ -1,15 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaProductRepository } from './prisma-product.repository.js';
 import { PrismaCategoryRepository } from './prisma-category.repository.js';
-import { PrismaService } from '@/core/database/prisma.service.js';
+import { PrismaService, RedisService } from '@/core/index.js';
 import { Product } from '../../../domain/entities/product.entity.js';
 import { Category } from '../../../domain/entities/category.entity.js';
+import { Price } from '../../../domain/value-objects/price.vo.js';
+import { SkuAttributes } from '../../../domain/value-objects/sku-attributes.vo.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
+import { CatalogErrorCodes } from '@/core/index.js';
 
 describe('PrismaProductRepository (Integration)', () => {
   let productRepo: PrismaProductRepository;
   let categoryRepo: PrismaCategoryRepository;
   let prismaService: PrismaService;
+  let redisService: RedisService;
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -17,6 +21,7 @@ describe('PrismaProductRepository (Integration)', () => {
         PrismaProductRepository,
         PrismaCategoryRepository,
         PrismaService,
+        RedisService,
         CatalogMapper,
       ],
     }).compile();
@@ -26,6 +31,7 @@ describe('PrismaProductRepository (Integration)', () => {
       PrismaCategoryRepository,
     );
     prismaService = module.get<PrismaService>(PrismaService);
+    redisService = module.get<RedisService>(RedisService);
   });
 
   beforeEach(async () => {
@@ -33,10 +39,14 @@ describe('PrismaProductRepository (Integration)', () => {
     await prismaService.sku.deleteMany();
     await prismaService.product.deleteMany();
     await prismaService.category.deleteMany();
+    // Tests reuse fixed ids across runs, so a leftover cache entry from a
+    // previous run could otherwise serve stale data instead of a miss.
+    await redisService.getClient().flushdb();
   });
 
   afterAll(async () => {
     await prismaService.$disconnect();
+    await redisService.getClient().quit();
   });
 
   it('should save a product with skus and find it by id', async () => {
@@ -55,13 +65,13 @@ describe('PrismaProductRepository (Integration)', () => {
       'prod_macbook',
     );
     product.addSku({
-      price: 1999,
-      attributes: { ram: '16GB', color: 'Silver' },
+      price: Price.create(1999),
+      attributes: SkuAttributes.create({ ram: '16GB', color: 'Silver' }),
       skuCode: 'SKU-MB-16-SL',
     });
     product.addSku({
-      price: 2499,
-      attributes: { ram: '32GB', color: 'Space Gray' },
+      price: Price.create(2499),
+      attributes: SkuAttributes.create({ ram: '32GB', color: 'Space Gray' }),
       skuCode: 'SKU-MB-32-SG',
     });
 
@@ -122,6 +132,45 @@ describe('PrismaProductRepository (Integration)', () => {
     expect(result2.meta.nextCursor).toBe(null);
   });
 
+  it('should full-text search products by name/description via the generated tsvector column', async () => {
+    const category = Category.create('Search Cat', null, 'cat_search');
+    await categoryRepo.save(category);
+
+    const macbook = Product.create(
+      {
+        categoryId: 'cat_search',
+        name: 'MacBook Pro',
+        description: 'Apple laptop',
+      },
+      'prod_search_1',
+    );
+    const dell = Product.create(
+      {
+        categoryId: 'cat_search',
+        name: 'Dell XPS',
+        description: 'Windows laptop',
+      },
+      'prod_search_2',
+    );
+    await productRepo.save(macbook);
+    await productRepo.save(dell);
+
+    const byDescription = await productRepo.findList({
+      limit: 10,
+      search: 'apple',
+    });
+    expect(byDescription.data.map((p) => p.id)).toEqual(['prod_search_1']);
+
+    const byName = await productRepo.findList({ limit: 10, search: 'dell' });
+    expect(byName.data.map((p) => p.id)).toEqual(['prod_search_2']);
+
+    const noMatch = await productRepo.findList({
+      limit: 10,
+      search: 'nonexistent-term',
+    });
+    expect(noMatch.data).toHaveLength(0);
+  });
+
   it('should not delete a SKU added concurrently by another request', async () => {
     const category = Category.create('Shoes', null, 'cat_shoes');
     await categoryRepo.save(category);
@@ -131,8 +180,8 @@ describe('PrismaProductRepository (Integration)', () => {
       'prod_sneaker',
     );
     initial.addSku({
-      price: 100,
-      attributes: { size: '40' },
+      price: Price.create(100),
+      attributes: SkuAttributes.create({ size: '40' }),
       skuCode: 'SNK-40',
     });
     await productRepo.save(initial);
@@ -143,20 +192,82 @@ describe('PrismaProductRepository (Integration)', () => {
 
     // Request A adds a new SKU and saves first.
     requestA!.addSku({
-      price: 120,
-      attributes: { size: '41' },
+      price: Price.create(120),
+      attributes: SkuAttributes.create({ size: '41' }),
       skuCode: 'SNK-41',
     });
     await productRepo.save(requestA!);
 
     // Request B only updates the product's name — it never touched SKUs —
-    // and saves from its now-stale in-memory snapshot (still just SNK-40).
+    // but saves from its now-stale in-memory snapshot (still version 1).
+    // Optimistic concurrency now rejects this outright instead of letting
+    // it through; the SKU-tracking fix alone only protected against the
+    // stale write silently deleting SNK-41, not the stale write itself.
     requestB!.updateDetails('Sneaker Pro');
-    await productRepo.save(requestB!);
+    await expect(productRepo.save(requestB!)).rejects.toMatchObject({
+      code: CatalogErrorCodes.CONCURRENCY_CONFLICT.code,
+    });
 
     const final = await productRepo.findById('prod_sneaker');
     const skuCodes = final?.getProps().skus.map((s) => s.getProps().skuCode);
     expect(skuCodes).toContain('SNK-40');
     expect(skuCodes).toContain('SNK-41');
+  });
+
+  it('should cache findById and invalidate the cache on save', async () => {
+    const category = Category.create('Cache Cat', null, 'cat_cache');
+    await categoryRepo.save(category);
+
+    const product = Product.create(
+      { categoryId: 'cat_cache', name: 'CacheTest' },
+      'prod_cache',
+    );
+    await productRepo.save(product);
+
+    // Populates the cache entry.
+    const firstRead = await productRepo.findById('prod_cache');
+    expect(firstRead?.name).toBe('CacheTest');
+
+    // Mutate the row directly, bypassing the repository (and therefore its
+    // cache invalidation), to prove the next read comes from cache.
+    await prismaService.product.update({
+      where: { id: 'prod_cache' },
+      data: { name: 'ChangedBehindCache' },
+    });
+    const cachedRead = await productRepo.findById('prod_cache');
+    expect(cachedRead?.name).toBe('CacheTest');
+
+    // A real write through the repository must invalidate that entry.
+    firstRead!.updateDetails('CacheInvalidated');
+    await productRepo.save(firstRead!);
+    const freshRead = await productRepo.findById('prod_cache');
+    expect(freshRead?.name).toBe('CacheInvalidated');
+  });
+
+  it('should reject a save based on a stale version (optimistic concurrency)', async () => {
+    const category = Category.create('Bags', null, 'cat_bags');
+    await categoryRepo.save(category);
+
+    const product = Product.create(
+      { categoryId: 'cat_bags', name: 'Backpack' },
+      'prod_backpack',
+    );
+    await productRepo.save(product);
+
+    const staleCopy = await productRepo.findById('prod_backpack');
+    const freshCopy = await productRepo.findById('prod_backpack');
+
+    // Fresh copy saves first and bumps the row's version.
+    freshCopy!.updateDetails('Backpack v2');
+    await productRepo.save(freshCopy!);
+
+    // Stale copy still thinks it's at the original version.
+    staleCopy!.updateDetails('Backpack v3 (stale)');
+    await expect(productRepo.save(staleCopy!)).rejects.toMatchObject({
+      code: CatalogErrorCodes.CONCURRENCY_CONFLICT.code,
+    });
+
+    const finalProduct = await productRepo.findById('prod_backpack');
+    expect(finalProduct?.name).toBe('Backpack v2');
   });
 });

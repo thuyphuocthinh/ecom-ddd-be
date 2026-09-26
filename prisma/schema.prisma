@@ -40,6 +40,7 @@ model Product {
   description String?       @db.Text
   thumbnail   String?       @db.VarChar(500)
   status      ProductStatus @default(DRAFT)
+  version     Int           @default(1)
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -48,6 +49,13 @@ model Product {
 
   @@index([categoryId, status])
 }
+
+// Note: the Product table also has a generated `searchVector` tsvector
+// column (name || description, 'simple' config) with a GIN index, added by
+// the hand-written migration prisma/migrations/1_add_product_search_vector
+// rather than declared here — Prisma's schema DSL can't express a
+// generated column. It's queried only via $queryRaw in
+// PrismaProductRepository.findList().
 
 model Sku {
   id         String   @id
