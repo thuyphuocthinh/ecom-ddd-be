@@ -8,6 +8,7 @@ import { LoggingInterceptor } from './core/http/interceptors/logging.interceptor
 import { AppLogger } from './core/http/logging/app.logger.js';
 
 import helmet from 'helmet';
+import { json } from 'express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
@@ -19,8 +20,15 @@ async function bootstrap() {
   // Security Headers
   app.use(helmet());
 
-  // CORS
-  app.enableCors();
+  // CORS — restrict origins in production via CORS_ORIGINS env var
+  // Example: CORS_ORIGINS=https://ecom.com,https://admin.ecom.com
+  const rawOrigins = process.env.CORS_ORIGINS;
+  app.enableCors({
+    origin: rawOrigins ? rawOrigins.split(',').map((o) => o.trim()) : '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    credentials: false, // tokens are in body, not cookies
+  });
 
   // Graceful Shutdown
   app.enableShutdownHooks();
@@ -31,7 +39,17 @@ async function bootstrap() {
   // Validation & Filters & Interceptors
   const clsService = app.get(ClsService);
 
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // Body size limit — reject oversized payloads before they hit any handler
+  // Prevents naive DoS via huge JSON body. 1 MB is generous for an API.
+  app.use(json({ limit: '1mb' }));
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true, // strip unknown fields silently
+      forbidNonWhitelisted: true, // AND reject request if unknown fields present
+      transform: true,
+    }),
+  );
   app.useGlobalFilters(new AllExceptionsFilter(clsService));
   app.useGlobalInterceptors(
     new LoggingInterceptor(),
