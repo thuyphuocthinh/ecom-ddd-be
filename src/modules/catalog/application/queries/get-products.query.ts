@@ -1,6 +1,7 @@
 import { ProductStatus } from '../../domain/index.js';
+import { IQuery } from '@nestjs/cqrs';
 
-export class GetProductsQuery {
+export class GetProductsQuery implements IQuery {
   constructor(
     public readonly limit: number = 20,
     public readonly cursor?: string,

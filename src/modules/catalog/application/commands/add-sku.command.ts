@@ -1,4 +1,6 @@
-export class AddSkuCommand {
+import { ICommand } from '@nestjs/cqrs';
+
+export class AddSkuCommand implements ICommand {
   constructor(
     public readonly productId: string,
     public readonly skuCode: string,

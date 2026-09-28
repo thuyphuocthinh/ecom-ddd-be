@@ -1,3 +1,5 @@
-export class DeleteCategoryCommand {
+import { ICommand } from '@nestjs/cqrs';
+
+export class DeleteCategoryCommand implements ICommand {
   constructor(public readonly id: string) {}
 }
