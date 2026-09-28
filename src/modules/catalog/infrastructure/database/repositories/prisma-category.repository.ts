@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ICategoryRepository, Category } from '../../../domain/index.js';
-import { PrismaService, RedisService } from '@/core/index.js';
+import { PrismaService, RedisService, CACHE, TTL } from '@/core/index.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
-
-const CATEGORY_CACHE_TTL_SECONDS = 300;
-const categoryCacheKey = (id: string) => `catalog:category:${id}`;
 
 @Injectable()
 export class PrismaCategoryRepository implements ICategoryRepository {
@@ -17,8 +14,8 @@ export class PrismaCategoryRepository implements ICategoryRepository {
 
   async findById(id: string): Promise<Category | null> {
     const cached = await this.redis.getOrSetNullableDetail(
-      categoryCacheKey(id),
-      CATEGORY_CACHE_TTL_SECONDS,
+      CACHE.CATALOG.KEYS.CATEGORY_DETAIL(id),
+      TTL.SHORT,
       async () => {
         this.logger.debug(`Finding category by ID: ${id}`);
         return this.prisma.category.findUnique({ where: { id } });
@@ -44,7 +41,9 @@ export class PrismaCategoryRepository implements ICategoryRepository {
       create: data,
       update: data,
     });
-    await this.redis.invalidateDetail(categoryCacheKey(category.id));
+    await this.redis.invalidateDetail(
+      CACHE.CATALOG.KEYS.CATEGORY_DETAIL(category.id),
+    );
   }
 
   async updatePathAndChildren(
@@ -90,7 +89,7 @@ export class PrismaCategoryRepository implements ICategoryRepository {
 
     await Promise.all(
       affectedIds.map((id) =>
-        this.redis.invalidateDetail(categoryCacheKey(id)),
+        this.redis.invalidateDetail(CACHE.CATALOG.KEYS.CATEGORY_DETAIL(id)),
       ),
     );
   }
@@ -116,6 +115,6 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     await this.prisma.category.delete({
       where: { id },
     });
-    await this.redis.invalidateDetail(categoryCacheKey(id));
+    await this.redis.invalidateDetail(CACHE.CATALOG.KEYS.CATEGORY_DETAIL(id));
   }
 }

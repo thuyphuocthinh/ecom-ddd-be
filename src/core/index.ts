@@ -16,6 +16,7 @@ export * from './http/dtos/pagination-query.dto.js';
 export * from './http/logging/app.logger.js';
 
 // Infrastructure — external systems (DB, cache, message broker, idempotency)
+export * from './infrastructure/cache/cache.constants.js';
 export * from './infrastructure/database/prisma.service.js';
 export * from './infrastructure/database/database.module.js';
 export * from './infrastructure/redis/redis.service.js';

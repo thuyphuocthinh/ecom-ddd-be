@@ -10,12 +10,11 @@ import {
   PaginatedResult,
   CatalogErrorCodes,
   RedisService,
+  CACHE,
+  TTL,
 } from '@/core/index.js';
 import { FindProductsParams } from '../../../domain/repositories/catalog.repository.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
-
-const PRODUCT_CACHE_TTL_SECONDS = 300;
-const productCacheKey = (id: string) => `catalog:product:${id}`;
 
 @Injectable()
 export class PrismaProductRepository implements IProductRepository {
@@ -28,8 +27,8 @@ export class PrismaProductRepository implements IProductRepository {
 
   async findById(id: string): Promise<Product | null> {
     const cached = await this.redis.getOrSetNullableDetail(
-      productCacheKey(id),
-      PRODUCT_CACHE_TTL_SECONDS,
+      CACHE.CATALOG.KEYS.PRODUCT_DETAIL(id),
+      TTL.SHORT,
       async () => {
         this.logger.debug(`Finding product by ID: ${id}`);
         // Luôn load kèm SKU để tạo thành 1 Aggregate Root hoàn chỉnh
@@ -124,7 +123,9 @@ export class PrismaProductRepository implements IProductRepository {
       // Sẽ implement Outbox entity sau.
     });
 
-    await this.redis.invalidateDetail(productCacheKey(product.id));
+    await this.redis.invalidateDetail(
+      CACHE.CATALOG.KEYS.PRODUCT_DETAIL(product.id),
+    );
   }
 
   async findList(
