@@ -46,9 +46,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
       code = exception.code;
       errors = exception.details || null;
-    } else if (exception instanceof Error) {
-      message = exception.message;
     }
+    // Anything else is an unexpected failure (Prisma, Redis, a bug...). Its message
+    // can carry SQL, table/column names or connection details, so the client only
+    // gets the generic 500 message; the real error is logged below.
 
     // Ghi log lỗi, AppLogger sẽ tự động thêm [TraceId-...] ở đầu nên không cần thêm thủ công ở đây
     this.logger.error(

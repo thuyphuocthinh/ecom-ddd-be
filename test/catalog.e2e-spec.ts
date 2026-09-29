@@ -6,6 +6,8 @@ import {
   PrismaService,
   AllExceptionsFilter,
   ResponseInterceptor,
+  JwtAuthGuard,
+  RolesGuard,
 } from './../src/core/index.js';
 import { ClsService } from 'nestjs-cls';
 
@@ -16,7 +18,12 @@ describe('CatalogController (e2e)', () => {
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     app = moduleFixture.createNestApplication();
 

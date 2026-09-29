@@ -114,3 +114,59 @@ export const CatalogErrorCodes = {
     status: HttpStatus.BAD_REQUEST,
   },
 };
+
+export const UserErrorCodes = {
+  DOMAIN_EXCEPTION: {
+    code: 'USR-000',
+    message: 'User domain exception',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  USER_NOT_FOUND: {
+    code: 'USR-001',
+    message: 'User not found',
+    status: HttpStatus.NOT_FOUND,
+  },
+  EMAIL_ALREADY_EXISTS: {
+    code: 'USR-002',
+    message: 'Email already exists',
+    status: HttpStatus.CONFLICT,
+  },
+};
+
+export const AuthErrorCodes = {
+  DOMAIN_EXCEPTION: {
+    code: 'AUTH-000',
+    message: 'Auth domain exception',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  INVALID_CREDENTIALS: {
+    code: 'AUTH-001',
+    message: 'Invalid email or password',
+    status: HttpStatus.UNAUTHORIZED,
+  },
+  TOKEN_EXPIRED: {
+    code: 'AUTH-002',
+    message: 'Token has expired',
+    status: HttpStatus.UNAUTHORIZED,
+  },
+  TOKEN_REVOKED: {
+    code: 'AUTH-003',
+    message: 'Token has been revoked',
+    status: HttpStatus.UNAUTHORIZED,
+  },
+  UNAUTHORIZED_ACCESS: {
+    code: 'AUTH-004',
+    message: 'Unauthorized access',
+    status: HttpStatus.UNAUTHORIZED,
+  },
+  FORBIDDEN_RESOURCE: {
+    code: 'AUTH-005',
+    message: 'Forbidden resource',
+    status: HttpStatus.FORBIDDEN,
+  },
+  RATE_LIMIT_EXCEEDED: {
+    code: 'AUTH-006',
+    message: 'Too many requests',
+    status: HttpStatus.TOO_MANY_REQUESTS,
+  },
+};

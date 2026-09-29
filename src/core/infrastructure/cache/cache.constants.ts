@@ -1,16 +1,18 @@
 const GLOBAL_PREFIX = 'ecom';
 const GLOBAL_VER = 'v1';
 
+import { buildTTL } from '../../utils/ttl.util.js';
+
 /**
  * Semantic TTL constants (in seconds).
  * Pick based on data volatility — see comment block at the bottom of this file.
  */
 export const TTL = {
-  TINY: 60, // 1 minute  — highly volatile (stock count, live price)
-  SHORT: 300, // 5 minutes — semi-volatile (product / category detail)
-  MEDIUM: 3600, // 1 hour    — semi-static (user profile, settings)
-  LONG: 86_400, // 1 day     — static (lookup tables, config)
-  WEEK: 604_800, // 1 week    — almost never changes
+  TINY: buildTTL('MINUTE', 1), // highly volatile (stock count, live price)
+  SHORT: buildTTL('MINUTE', 5), // semi-volatile (product / category detail)
+  MEDIUM: buildTTL('HOUR', 1), // semi-static (user profile, settings)
+  LONG: buildTTL('DAY', 1), // static (lookup tables, config)
+  WEEK: buildTTL('DAY', 7), // almost never changes
 } as const;
 
 /**
@@ -38,6 +40,30 @@ export const CACHE = {
 
       CATEGORY_DETAIL: (id: string): string =>
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:catalog:${CACHE.CATALOG._VER}:category:id_${id}`,
+    },
+  },
+  AUTH: {
+    _VER: 'v1',
+    SETTINGS: {
+      ROTATION_GRACE_TTL: buildTTL('SECOND', 15), // grace window cho concurrent refresh
+    },
+    KEYS: {
+      BLACKLIST: (tokenHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:blacklist:${tokenHash}`,
+      TOKEN_VERSION: (userId: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:version:${userId}`,
+      REFRESH_TOKEN: (tokenHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:refresh:${tokenHash}`,
+      ROTATION_GRACE: (tokenHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:rotation_grace:${tokenHash}`,
+    },
+  },
+  RATE_LIMIT: {
+    _VER: 'v1',
+    KEYS: {
+      // route: Express route pattern (e.g. /auth/login), identifier: e.g. ip:1.1.1.1
+      BUCKET: (route: string, identifier: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:ratelimit:${CACHE.RATE_LIMIT._VER}:${route}:${identifier}`,
     },
   },
 } as const;

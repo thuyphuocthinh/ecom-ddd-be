@@ -10,6 +10,7 @@ import {
   HttpStatus,
   Delete,
   Patch,
+  UseGuards,
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
@@ -19,7 +20,10 @@ import {
   ApiParam,
   ApiQuery,
   ApiHeader,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
+import { JwtAuthGuard, RolesGuard, Roles } from '@/core/index.js';
+import { UserRole } from '@prisma/client';
 import { CreateCategoryDto } from '../dtos/create-category.dto.js';
 import { MoveCategoryDto } from '../dtos/move-category.dto.js';
 import { UpdateCategoryDto } from '../dtos/update-category.dto.js';
@@ -48,7 +52,10 @@ export class CategoryController {
   ) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new category' })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -119,7 +126,10 @@ export class CategoryController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Update category details' })
   @ApiParam({ name: 'id', description: 'Category ID' })
   @ApiResponse({ status: 200, description: 'Category updated successfully' })
@@ -137,7 +147,10 @@ export class CategoryController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a category' })
   @ApiParam({ name: 'id', description: 'Category ID' })
   @ApiResponse({ status: 204, description: 'Category deleted successfully' })
@@ -153,7 +166,10 @@ export class CategoryController {
   }
 
   @Patch(':id/move')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Move a category to a new parent' })
   @ApiParam({ name: 'id', description: 'Category ID' })
   @ApiResponse({ status: 200, description: 'Category moved successfully' })

@@ -10,6 +10,7 @@ import {
   HttpStatus,
   Delete,
   Patch,
+  UseGuards,
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
@@ -20,7 +21,10 @@ import {
   ApiHeader,
   ApiExtraModels,
   getSchemaPath,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
+import { JwtAuthGuard, RolesGuard, Roles } from '@/core/index.js';
+import { UserRole } from '@prisma/client';
 import {
   IdempotencyService,
   computeIdempotencyFingerprint,
@@ -57,7 +61,10 @@ export class ProductController {
   ) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new product' })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -97,7 +104,10 @@ export class ProductController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Update product details' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({ status: 200, description: 'Product updated successfully' })
@@ -170,7 +180,10 @@ export class ProductController {
   }
 
   @Patch(':id/publish')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Publish a product' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({ status: 200, description: 'Product published successfully' })
@@ -189,7 +202,10 @@ export class ProductController {
   }
 
   @Patch(':id/unpublish')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Unpublish a product' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({ status: 200, description: 'Product unpublished successfully' })
@@ -206,7 +222,10 @@ export class ProductController {
   // ================= SKUS =================
 
   @Post(':id/skus')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Add a SKU to a product' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiResponse({ status: 201, description: 'SKU added successfully' })
@@ -230,7 +249,10 @@ export class ProductController {
   }
 
   @Delete(':id/skus/:skuId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Remove a SKU from a product' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiParam({ name: 'skuId', description: 'SKU ID' })
@@ -242,7 +264,10 @@ export class ProductController {
   }
 
   @Patch(':id/skus/:skuId/price')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Update price of a SKU' })
   @ApiParam({ name: 'id', description: 'Product ID' })
   @ApiParam({ name: 'skuId', description: 'SKU ID' })
