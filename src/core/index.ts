@@ -19,6 +19,7 @@ export * from './http/guards/jwt-auth.guard.js';
 export * from './http/guards/roles.guard.js';
 export * from './http/decorators/rate-limit.decorator.js';
 export * from './http/decorators/current-user.decorator.js';
+export * from './http/decorators/client-info.decorator.js';
 export * from './http/decorators/roles.decorator.js';
 export * from './http/interfaces/authenticated-request.interface.js';
 

@@ -4,7 +4,6 @@ import {
   HttpCode,
   HttpStatus,
   Post,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
@@ -19,6 +18,7 @@ import {
   RegisterDto,
   LoginDto,
   RefreshTokenDto,
+  LogoutDto,
   AuthResponseDto,
   RegisterResponseDto,
 } from '../dtos/index.js';
@@ -32,10 +32,11 @@ import {
 import {
   JwtAuthGuard,
   CurrentUser,
+  ClientInfo,
   RateLimit,
   buildTTL,
 } from '@/core/index.js';
-import type { ICurrentUser, AuthenticatedRequest } from '@/core/index.js';
+import type { ICurrentUser, IClientInfo } from '@/core/index.js';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -58,8 +59,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiResponse({ status: HttpStatus.OK, type: AuthResponseDto })
-  async login(@Body() dto: LoginDto): Promise<AuthResponseDto> {
-    return this.commandBus.execute(new LoginCommand(dto.email, dto.password));
+  async login(
+    @Body() dto: LoginDto,
+    @ClientInfo() client: IClientInfo,
+  ): Promise<AuthResponseDto> {
+    return this.commandBus.execute(
+      new LoginCommand(dto.email, dto.password, client),
+    );
   }
 
   @Post('refresh')
@@ -67,23 +73,28 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({ status: HttpStatus.OK, type: AuthResponseDto })
-  async refresh(@Body() dto: RefreshTokenDto): Promise<AuthResponseDto> {
-    return this.commandBus.execute(new RefreshTokenCommand(dto.refreshToken));
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @ClientInfo() client: IClientInfo,
+  ): Promise<AuthResponseDto> {
+    return this.commandBus.execute(
+      new RefreshTokenCommand(dto.refreshToken, client.ip),
+    );
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
+  @RateLimit({ limit: 10, window: buildTTL('MINUTE', 1), key: 'user' })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout and invalidate current session' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT })
   async logout(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: RefreshTokenDto,
+    @CurrentUser() user: ICurrentUser,
+    // Accepted for older clients, not used: the session comes from the access token
+    @Body() _dto: LogoutDto,
   ): Promise<void> {
-    await this.commandBus.execute(
-      new LogoutCommand(req.token, dto.refreshToken, req.tokenExp),
-    );
+    await this.commandBus.execute(new LogoutCommand(user.sid, user.id));
   }
 
   @Post('logout-all')

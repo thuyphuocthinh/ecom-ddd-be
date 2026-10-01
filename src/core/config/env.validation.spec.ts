@@ -43,20 +43,21 @@ describe('validateEnv', () => {
       ).toThrow(/JWT_ACCESS_SECRET/);
     });
 
-    it.each(['JWT_ACCESS_TTL_SECONDS', 'REFRESH_TOKEN_TTL_SECONDS'])(
-      'throws when %s is not a positive integer',
-      (name) => {
-        expect(() => validateEnv({ ...VALID, [name]: 'abc' })).toThrow(
-          new RegExp(name),
-        );
-        expect(() => validateEnv({ ...VALID, [name]: '0' })).toThrow(
-          new RegExp(name),
-        );
-        expect(() => validateEnv({ ...VALID, [name]: '-5' })).toThrow(
-          new RegExp(name),
-        );
-      },
-    );
+    it.each([
+      'JWT_ACCESS_TTL_SECONDS',
+      'REFRESH_TOKEN_TTL_SECONDS',
+      'SESSION_ABSOLUTE_TTL_SECONDS',
+    ])('throws when %s is not a positive integer', (name) => {
+      expect(() => validateEnv({ ...VALID, [name]: 'abc' })).toThrow(
+        new RegExp(name),
+      );
+      expect(() => validateEnv({ ...VALID, [name]: '0' })).toThrow(
+        new RegExp(name),
+      );
+      expect(() => validateEnv({ ...VALID, [name]: '-5' })).toThrow(
+        new RegExp(name),
+      );
+    });
 
     it('accepts the TTL variables when they are positive integers (env values are strings)', () => {
       expect(() =>
@@ -64,6 +65,7 @@ describe('validateEnv', () => {
           ...VALID,
           JWT_ACCESS_TTL_SECONDS: '900',
           REFRESH_TOKEN_TTL_SECONDS: '604800',
+          SESSION_ABSOLUTE_TTL_SECONDS: '2592000',
         }),
       ).not.toThrow();
     });

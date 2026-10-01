@@ -1,9 +1,9 @@
 import { ICommand } from '@nestjs/cqrs';
 
+/** Ends the session the request's access token belongs to. */
 export class LogoutCommand implements ICommand {
   constructor(
-    public readonly accessToken: string,
-    public readonly refreshToken: string,
-    public readonly exp: number,
+    public readonly sessionId: string,
+    public readonly userId: string,
   ) {}
 }

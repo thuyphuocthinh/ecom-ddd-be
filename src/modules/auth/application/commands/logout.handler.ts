@@ -1,23 +1,30 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { Inject } from '@nestjs/common';
 import { LogoutCommand } from './logout.command.js';
+import type { ISessionRepository } from '../../domain/index.js';
 import { TokenStore } from '../../infrastructure/index.js';
+import { TokenIssuer } from '../services/token-issuer.service.js';
 
 @CommandHandler(LogoutCommand)
 export class LogoutHandler implements ICommandHandler<LogoutCommand> {
-  constructor(private readonly tokenStore: TokenStore) {}
+  constructor(
+    @Inject('ISessionRepository')
+    private readonly sessionRepo: ISessionRepository,
+    private readonly tokenStore: TokenStore,
+    private readonly tokenIssuer: TokenIssuer,
+  ) {}
 
   async execute(command: LogoutCommand): Promise<void> {
-    const { accessToken, refreshToken, exp } = command;
+    const { sessionId, userId } = command;
 
-    // 1. Revoke Refresh Token immediately
-    await this.tokenStore.revokeRefreshToken(refreshToken);
+    // 1. Close the session: its refresh token stops working
+    await this.sessionRepo.revoke(sessionId, userId, 'LOGOUT', new Date());
 
-    // 2. Blacklist Access Token until its natural expiration
-    const now = Math.floor(Date.now() / 1000);
-    const ttl = exp - now;
-
-    if (ttl > 0) {
-      await this.tokenStore.blacklistAccessToken(accessToken, ttl);
-    }
+    // 2. Flag it so the session's access tokens are refused right away. Done even
+    // when the session was already closed, so a retried logout still ends up revoked.
+    await this.tokenStore.markSessionsRevoked(
+      [sessionId],
+      this.tokenIssuer.accessTtlSeconds,
+    );
   }
 }

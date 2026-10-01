@@ -15,7 +15,7 @@ interface AccessTokenPayload {
   sub: string;
   role: AuthenticatedRequest['user']['role'];
   ver: number;
-  exp: number;
+  sid?: string;
 }
 
 /**
@@ -25,12 +25,13 @@ interface AccessTokenPayload {
  * Checks (in order):
  *  1. Bearer token present in Authorization header
  *  2. Signature valid & not expired (via JwtService, secret from the JwtModule config)
- *  3. Token not blacklisted in Redis (explicit logout)
- *  4. Token version >= global version (logout-all)
+ *  3. Token carries a session id (`sid`); tokens issued before sessions existed don't
+ *  4. Session not flagged revoked in Redis (logout, revoke-a-device, reuse detected)
+ *  5. Token version >= global version (logout-all)
  *
- * Checks 3–4 fail CLOSED: if Redis can't answer, the token can't be proven
+ * Checks 4–5 fail CLOSED: if Redis can't answer, the token can't be proven
  * unrevoked, so the request is refused (503, not 401 — the session itself is
- * fine, and a 401 would make clients discard it).
+ * fine, and a 401 would make clients discard it). Neither touches the database.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -53,11 +54,15 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const payload = await this.verifySignature(token);
-    await this.assertNotRevoked(token, payload);
+    const sid = this.requireSessionId(payload);
+    await this.assertNotRevoked(payload, sid);
 
-    request.user = { id: payload.sub, role: payload.role, ver: payload.ver };
-    request.token = token;
-    request.tokenExp = payload.exp;
+    request.user = {
+      id: payload.sub,
+      role: payload.role,
+      ver: payload.ver,
+      sid,
+    };
 
     return true;
   }
@@ -74,15 +79,27 @@ export class JwtAuthGuard implements CanActivate {
     }
   }
 
+  // A token without `sid` predates sessions and can't be tied to one: the
+  // client must log in again.
+  private requireSessionId(payload: AccessTokenPayload): string {
+    if (!payload.sid) {
+      throw new DomainException(
+        AuthErrorCodes.UNAUTHORIZED_ACCESS,
+        'Invalid or expired token',
+      );
+    }
+    return payload.sid;
+  }
+
   private async assertNotRevoked(
-    token: string,
     payload: AccessTokenPayload,
+    sid: string,
   ): Promise<void> {
-    let isBlacklisted: boolean;
+    let isSessionRevoked: boolean;
     let currentVersion: number;
     try {
-      [isBlacklisted, currentVersion] = await Promise.all([
-        this.tokenStore.isAccessTokenBlacklisted(token),
+      [isSessionRevoked, currentVersion] = await Promise.all([
+        this.tokenStore.isSessionRevoked(sid),
         this.tokenStore.getTokenVersion(payload.sub),
       ]);
     } catch (error: any) {
@@ -94,8 +111,8 @@ export class JwtAuthGuard implements CanActivate {
       );
     }
 
-    // 1. Explicit logout
-    if (isBlacklisted) {
+    // 1. Session revoked (logout, revoke-a-device, reuse detected)
+    if (isSessionRevoked) {
       throw new DomainException(
         AuthErrorCodes.TOKEN_REVOKED,
         'Token has been revoked',

@@ -92,6 +92,56 @@ model User {
   updatedAt   DateTime         @updatedAt
 
   credentials UserCredential[]
+  sessions    Session[]
+}
+
+enum SessionRevokeReason {
+  LOGOUT
+  LOGOUT_OTHERS
+  LOGOUT_ALL
+  REUSE_DETECTED
+  ADMIN
+}
+
+// Một dòng = một lần đăng nhập trên một thiết bị. `id` chính là `sid` nằm trong access token.
+//
+// Thuật ngữ:
+//  - rotate : đổi refresh token (RT) cũ lấy RT mới TRONG CÙNG session (mỗi lần AT hết hạn, client refresh).
+//             Session giữ nguyên (cùng id, cùng createdAt); RT cũ chỉ dùng được một lần.
+//  - revoke : đóng session chủ động (đăng xuất, thu hồi thiết bị, phát hiện RT cũ bị dùng lại).
+//             RT của nó hết tác dụng và AT bị chặn ngay nhờ cờ trong Redis.
+//  - expire : session hết hạn tự nhiên (quá expiresAt), không ai làm gì cả.
+//  Một session còn sống khi revokedAt là null VÀ expiresAt còn ở tương lai.
+model Session {
+  id                       String               @id // uuid
+  userId                   String
+  // sha256 của RT hiện hành — không bao giờ lưu RT thô
+  refreshTokenHash         String               @unique
+  // RT bị thay ở lần rotate gần nhất. Giữ lại để nhận ra "RT cũ đã bị đổi rồi mà vẫn có người đem ra dùng"
+  previousRefreshTokenHash String?
+  // Lần gần nhất RT được đổi sang RT mới (rotate); null = chưa refresh lần nào.
+  // Phân biệt "vừa đổi < 15 giây" (2 tab refresh cùng lúc, hợp lệ) với "đổi từ lâu" (RT cũ bị dùng lại, đáng ngờ)
+  rotatedAt                DateTime?
+  // User-Agent cắt ngắn — chỉ để hiển thị cho chủ session nhận ra thiết bị
+  deviceName               String               @db.VarChar(255)
+  // IP lần dùng gần nhất (lúc đăng nhập, rồi cập nhật mỗi lần refresh)
+  ipAddress                String               @db.VarChar(64)
+  // Lần gần nhất thiết bị này dùng session (đăng nhập, rồi mỗi lần refresh) — để hiện "dùng lần cuối lúc nào"
+  lastUsedAt               DateTime
+  // Lúc đăng nhập, tức lúc session ra đời. KHÔNG BAO GIỜ ĐỔI — là mốc tính trần 30 ngày
+  createdAt                DateTime             @default(now())
+  // Hạn chót: quá giờ này session không dùng được nữa. Mỗi lần refresh được gia hạn thêm 7 ngày
+  // nhưng không vượt createdAt + 30 ngày: min(now + 7 ngày, createdAt + 30 ngày)
+  expiresAt                DateTime
+  // Lúc session bị đóng chủ động (revoke); null = chưa bị đóng. Chỉ đặt một lần
+  revokedAt                DateTime?
+  // Vì sao bị đóng: đăng xuất, thu hồi thiết bị khác, đăng xuất tất cả, RT cũ bị dùng lại, hoặc admin
+  revokedReason            SessionRevokeReason?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([previousRefreshTokenHash])
 }
 
 model UserCredential {

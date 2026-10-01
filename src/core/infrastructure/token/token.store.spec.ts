@@ -8,33 +8,39 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 describe('TokenStore', () => {
   let store: TokenStore;
+  let pipeline: {
+    set: ReturnType<typeof vi.fn>;
+    exec: ReturnType<typeof vi.fn>;
+  };
   let client: {
     get: ReturnType<typeof vi.fn>;
     set: ReturnType<typeof vi.fn>;
-    del: ReturnType<typeof vi.fn>;
     incr: ReturnType<typeof vi.fn>;
-    eval: ReturnType<typeof vi.fn>;
+    pipeline: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
+    pipeline = {
+      set: vi.fn().mockReturnThis(),
+      exec: vi.fn().mockResolvedValue([[null, 'OK']]),
+    };
     client = {
       get: vi.fn(),
       set: vi.fn().mockResolvedValue('OK'),
-      del: vi.fn().mockResolvedValue(1),
       incr: vi.fn().mockResolvedValue(1),
-      eval: vi.fn(),
+      pipeline: vi.fn().mockReturnValue(pipeline),
     };
     store = new TokenStore({
       getClient: () => client,
     } as unknown as RedisService);
   });
 
-  describe('Redis failures are never swallowed (a silent failure = revoked token treated as valid)', () => {
+  describe('Redis failures are never swallowed (a silent failure = revoked session treated as valid)', () => {
     const down = new Error('ECONNREFUSED');
 
-    it('isAccessTokenBlacklisted rejects instead of answering "not blacklisted"', async () => {
+    it('isSessionRevoked rejects instead of answering "not revoked"', async () => {
       client.get.mockRejectedValue(down);
-      await expect(store.isAccessTokenBlacklisted('at')).rejects.toThrow(
+      await expect(store.isSessionRevoked('sid-1')).rejects.toThrow(
         'ECONNREFUSED',
       );
     });
@@ -51,123 +57,140 @@ describe('TokenStore', () => {
       );
     });
 
-    it('blacklistAccessToken rejects so logout cannot report success without writing', async () => {
-      client.set.mockRejectedValue(down);
-      await expect(store.blacklistAccessToken('at', 60)).rejects.toThrow(
+    it('markSessionsRevoked rejects when the pipeline cannot run', async () => {
+      pipeline.exec.mockRejectedValue(down);
+      await expect(store.markSessionsRevoked(['sid-1'], 900)).rejects.toThrow(
         'ECONNREFUSED',
       );
     });
 
-    it('storeRefreshToken rejects so login cannot hand out an RT that was never stored', async () => {
+    it('markSessionsRevoked rejects when a command inside the pipeline failed (exec() itself resolves)', async () => {
+      pipeline.exec.mockResolvedValue([
+        [null, 'OK'],
+        [down, null],
+      ]);
+      await expect(
+        store.markSessionsRevoked(['sid-1', 'sid-2'], 900),
+      ).rejects.toThrow('ECONNREFUSED');
+    });
+
+    it('setRotationGrace rejects so a rotation cannot report success without a grace entry', async () => {
       client.set.mockRejectedValue(down);
-      await expect(store.storeRefreshToken('rt', 'u1', 0, 60)).rejects.toThrow(
-        'ECONNREFUSED',
-      );
+      await expect(
+        store.setRotationGrace('old-rt', {
+          accessToken: 'new.at',
+          refreshToken: 'new-rt',
+        }),
+      ).rejects.toThrow('ECONNREFUSED');
     });
   });
 
-  describe('basic operations', () => {
-    it('getTokenVersion defaults to 0 when nothing is stored', async () => {
+  describe('token version', () => {
+    it('defaults to 0 when nothing is stored', async () => {
       client.get.mockResolvedValue(null);
       await expect(store.getTokenVersion('u1')).resolves.toBe(0);
     });
 
-    it('stores only the sha256 of a refresh token, never the raw token', async () => {
-      await store.storeRefreshToken('raw-rt', 'u1', 2, 600);
-
-      const [key, value, mode, ttl] = client.set.mock.calls[0];
-      expect(key).toBe(CACHE.AUTH.KEYS.REFRESH_TOKEN(sha256('raw-rt')));
-      expect(key).not.toContain('raw-rt');
-      expect(JSON.parse(value)).toEqual({ userId: 'u1', version: 2 });
-      expect([mode, ttl]).toEqual(['EX', 600]);
+    it('reads the stored number', async () => {
+      client.get.mockResolvedValue('4');
+      await expect(store.getTokenVersion('u1')).resolves.toBe(4);
     });
   });
 
-  describe('rotateRefreshToken', () => {
-    const params = {
-      oldRefreshToken: 'old-rt',
-      newRefreshToken: 'new-rt',
-      userId: 'u1',
-      version: 3,
-      ttl: 604800,
-      newTokens: { accessToken: 'new.at', refreshToken: 'new-rt' },
+  describe('session revocation flag', () => {
+    it('flags every given session with the given TTL in one pipeline', async () => {
+      await store.markSessionsRevoked(['sid-1', 'sid-2'], 900);
+
+      expect(pipeline.set).toHaveBeenCalledTimes(2);
+      expect(pipeline.set).toHaveBeenCalledWith(
+        CACHE.AUTH.KEYS.SESSION_REVOKED('sid-1'),
+        '1',
+        'EX',
+        900,
+      );
+      expect(pipeline.set).toHaveBeenCalledWith(
+        CACHE.AUTH.KEYS.SESSION_REVOKED('sid-2'),
+        '1',
+        'EX',
+        900,
+      );
+      expect(pipeline.exec).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not touch Redis when there is nothing to flag', async () => {
+      await store.markSessionsRevoked([], 900);
+      expect(client.pipeline).not.toHaveBeenCalled();
+    });
+
+    it('isSessionRevoked is true only when the flag is set', async () => {
+      client.get.mockResolvedValueOnce('1');
+      await expect(store.isSessionRevoked('sid-1')).resolves.toBe(true);
+
+      client.get.mockResolvedValueOnce(null);
+      await expect(store.isSessionRevoked('sid-2')).resolves.toBe(false);
+
+      expect(client.get).toHaveBeenCalledWith(
+        CACHE.AUTH.KEYS.SESSION_REVOKED('sid-1'),
+      );
+    });
+  });
+
+  describe('rotation grace entry', () => {
+    const newTokens = { accessToken: 'new.at', refreshToken: 'new-rt' };
+
+    const setAndCapture = async () => {
+      await store.setRotationGrace('old-rt', newTokens);
+      return client.set.mock.calls[0][1] as string;
     };
 
-    it('runs one atomic script over old RT, new RT and grace keys', async () => {
-      client.eval.mockResolvedValue(1);
+    it('is stored under the sha256 of the OLD refresh token with the grace TTL', async () => {
+      await store.setRotationGrace('old-rt', newTokens);
 
-      await expect(store.rotateRefreshToken(params)).resolves.toBe(true);
-
-      const args = client.eval.mock.calls[0];
-      expect(args[1]).toBe(3);
-      expect(args.slice(2, 5)).toEqual([
-        CACHE.AUTH.KEYS.REFRESH_TOKEN(sha256('old-rt')),
-        CACHE.AUTH.KEYS.REFRESH_TOKEN(sha256('new-rt')),
-        CACHE.AUTH.KEYS.ROTATION_GRACE(sha256('old-rt')),
+      const [key, , mode, ttl] = client.set.mock.calls[0];
+      expect(key).toBe(CACHE.AUTH.KEYS.ROTATION_GRACE(sha256('old-rt')));
+      expect(key).not.toContain('old-rt');
+      expect([mode, ttl]).toEqual([
+        'EX',
+        CACHE.AUTH.SETTINGS.ROTATION_GRACE_TTL,
       ]);
-      expect(JSON.parse(args[5])).toEqual({ userId: 'u1', version: 3 });
-      expect(args[6]).toBe(604800);
-      expect(args[8]).toBe(CACHE.AUTH.SETTINGS.ROTATION_GRACE_TTL);
     });
 
-    it('returns false when the old RT was already rotated by a concurrent request', async () => {
-      client.eval.mockResolvedValue(0);
-      await expect(store.rotateRefreshToken(params)).resolves.toBe(false);
-    });
+    it('is readable by the holder of the old RT', async () => {
+      client.get.mockResolvedValue(await setAndCapture());
 
-    it('rejects if Redis is unreachable', async () => {
-      client.eval.mockRejectedValue(new Error('ECONNREFUSED'));
-      await expect(store.rotateRefreshToken(params)).rejects.toThrow(
-        'ECONNREFUSED',
+      await expect(store.getRotationGrace('old-rt')).resolves.toEqual(
+        newTokens,
       );
     });
 
-    describe('grace entry', () => {
-      const rotateAndCapture = async () => {
-        client.eval.mockResolvedValue(1);
-        await store.rotateRefreshToken(params);
-        return client.eval.mock.calls[0][7] as string;
-      };
+    it('never contains the new tokens in plain text', async () => {
+      const stored = await setAndCapture();
 
-      it('is readable by the holder of the old RT', async () => {
-        client.get.mockResolvedValue(await rotateAndCapture());
+      expect(stored).not.toContain('new.at');
+      expect(stored).not.toContain('new-rt');
+      expect(Buffer.from(stored, 'base64').toString('utf8')).not.toContain(
+        'new.at',
+      );
+    });
 
-        await expect(store.getRotationGrace('old-rt')).resolves.toEqual(
-          params.newTokens,
-        );
-      });
+    it('cannot be decrypted with a different RT (e.g. someone who only has a Redis dump)', async () => {
+      client.get.mockResolvedValue(await setAndCapture());
 
-      it('never contains the new tokens in plain text', async () => {
-        const stored = await rotateAndCapture();
+      await expect(store.getRotationGrace('some-other-rt')).resolves.toBeNull();
+    });
 
-        expect(stored).not.toContain('new.at');
-        expect(stored).not.toContain('new-rt');
-        expect(Buffer.from(stored, 'base64').toString('utf8')).not.toContain(
-          'new.at',
-        );
-      });
+    it('returns null for a tampered entry', async () => {
+      const stored = await setAndCapture();
+      const raw = Buffer.from(stored, 'base64');
+      raw[raw.length - 1] ^= 0xff;
+      client.get.mockResolvedValue(raw.toString('base64'));
 
-      it('cannot be decrypted with a different RT (e.g. someone who only has a Redis dump)', async () => {
-        client.get.mockResolvedValue(await rotateAndCapture());
+      await expect(store.getRotationGrace('old-rt')).resolves.toBeNull();
+    });
 
-        await expect(
-          store.getRotationGrace('some-other-rt'),
-        ).resolves.toBeNull();
-      });
-
-      it('returns null for a tampered entry', async () => {
-        const stored = await rotateAndCapture();
-        const raw = Buffer.from(stored, 'base64');
-        raw[raw.length - 1] ^= 0xff;
-        client.get.mockResolvedValue(raw.toString('base64'));
-
-        await expect(store.getRotationGrace('old-rt')).resolves.toBeNull();
-      });
-
-      it('returns null when there is no grace entry', async () => {
-        client.get.mockResolvedValue(null);
-        await expect(store.getRotationGrace('old-rt')).resolves.toBeNull();
-      });
+    it('returns null when there is no grace entry', async () => {
+      client.get.mockResolvedValue(null);
+      await expect(store.getRotationGrace('old-rt')).resolves.toBeNull();
     });
   });
 });

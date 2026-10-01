@@ -2,19 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { RedisService } from '../redis/redis.service.js';
 import { CACHE } from '../cache/cache.constants.js';
+import { HashUtil } from '../../utils/hash.util.js';
 import * as crypto from 'crypto';
-
-// Claim the old RT and write its successor + grace entry as ONE atomic step.
-// DEL returns 0 when another request already rotated this RT, so exactly one
-// concurrent caller wins; the rest fall back to the winner's grace entry.
-const ROTATE_REFRESH_TOKEN_SCRIPT = `
-  if redis.call("DEL", KEYS[1]) == 0 then
-    return 0
-  end
-  redis.call("SET", KEYS[2], ARGV[1], "EX", ARGV[2])
-  redis.call("SET", KEYS[3], ARGV[3], "EX", ARGV[4])
-  return 1
-`;
 
 const GRACE_IV_BYTES = 12;
 const GRACE_TAG_BYTES = 16;
@@ -24,23 +13,20 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-export interface RotateRefreshTokenParams {
-  oldRefreshToken: string;
-  newRefreshToken: string;
-  userId: string;
-  version: number;
-  ttl: number;
-  newTokens: TokenPair;
-}
-
 /**
- * Redis-backed store for JWT lifecycle management.
+ * Redis-backed store for the short-lived, hot-path token state:
+ *  - the per-user token version (logout-all),
+ *  - the per-session "revoked" flag that makes JwtAuthGuard refuse a session's
+ *    access tokens at once,
+ *  - the encrypted grace entry for concurrent refreshes.
+ * Refresh tokens themselves live in the Session table (Postgres), not here.
+ *
  * Lives in core because JwtAuthGuard (also in core) depends on it,
  * and all its own dependencies (RedisService, CACHE) are already in core.
  *
  * Talks to the raw Redis client on purpose: RedisService's helpers swallow
  * errors (fine for a cache), but here a silent failure would mean a revoked
- * token treated as valid, or a logout reported as done when nothing was written.
+ * session treated as valid, or a logout reported as done when nothing was written.
  * Every method rejects if Redis is unreachable — callers must not assume success.
  */
 @Injectable()
@@ -51,13 +37,6 @@ export class TokenStore {
 
   private get client(): Redis {
     return this.redis.getClient();
-  }
-
-  /**
-   * Hash a raw token (AT or RT) for safe storage in Redis.
-   */
-  private hashToken(token: string): string {
-    return crypto.createHash('sha256').update(token).digest('hex');
   }
 
   // --- Token Versioning (Logout All) ---
@@ -72,88 +51,66 @@ export class TokenStore {
     await this.client.incr(CACHE.AUTH.KEYS.TOKEN_VERSION(userId));
   }
 
-  // --- Blacklist (Logout) ---
+  // --- Session revocation flag ---
 
-  async blacklistAccessToken(accessToken: string, ttl: number): Promise<void> {
-    const hash = this.hashToken(accessToken);
-    await this.client.set(CACHE.AUTH.KEYS.BLACKLIST(hash), '1', 'EX', ttl);
-  }
-
-  async isAccessTokenBlacklisted(accessToken: string): Promise<boolean> {
-    const hash = this.hashToken(accessToken);
-    return (await this.client.get(CACHE.AUTH.KEYS.BLACKLIST(hash))) === '1';
-  }
-
-  // --- Refresh Token Lifecycle ---
-
-  async storeRefreshToken(
-    refreshToken: string,
-    userId: string,
-    version: number,
-    ttl: number,
+  /**
+   * Flags sessions as revoked. `ttlSeconds` must cover the longest a still-valid
+   * access token can live (the access-token TTL): after that, no token of these
+   * sessions can pass the signature check anyway.
+   */
+  async markSessionsRevoked(
+    sessionIds: string[],
+    ttlSeconds: number,
   ): Promise<void> {
-    const hash = this.hashToken(refreshToken);
-    const value = JSON.stringify({ userId, version });
-    await this.client.set(
-      CACHE.AUTH.KEYS.REFRESH_TOKEN(hash),
-      value,
-      'EX',
-      ttl,
+    if (sessionIds.length === 0) {
+      return;
+    }
+    const pipeline = this.client.pipeline();
+    for (const sessionId of sessionIds) {
+      pipeline.set(
+        CACHE.AUTH.KEYS.SESSION_REVOKED(sessionId),
+        '1',
+        'EX',
+        ttlSeconds,
+      );
+    }
+    const results = await pipeline.exec();
+    // pipeline.exec() resolves even when a command failed; surface that
+    const failed = results?.find(([error]) => error);
+    if (failed) {
+      throw failed[0];
+    }
+  }
+
+  async isSessionRevoked(sessionId: string): Promise<boolean> {
+    return (
+      (await this.client.get(CACHE.AUTH.KEYS.SESSION_REVOKED(sessionId))) ===
+      '1'
     );
   }
 
-  async revokeRefreshToken(refreshToken: string): Promise<void> {
-    const hash = this.hashToken(refreshToken);
-    await this.client.del(CACHE.AUTH.KEYS.REFRESH_TOKEN(hash));
-  }
+  // --- Refresh Token Rotation grace window ---
 
   /**
-   * Verifies if RT exists. Returns { userId, version } if valid, null if not.
+   * Records the pair issued by a rotation under the OLD refresh token, so a
+   * concurrent request still holding the old token within the window gets the
+   * same new tokens back instead of a 401.
    */
-  async verifyRefreshToken(
-    refreshToken: string,
-  ): Promise<{ userId: string; version: number } | null> {
-    const hash = this.hashToken(refreshToken);
-    const val = await this.client.get(CACHE.AUTH.KEYS.REFRESH_TOKEN(hash));
-    return val ? JSON.parse(val) : null;
-  }
-
-  // --- Refresh Token Rotation (+ grace window) ---
-
-  /**
-   * Atomically swaps the old RT for a new one and records the grace entry.
-   * Returns false when the old RT is already gone — i.e. a concurrent request
-   * rotated it first; the caller should then read that request's grace entry.
-   *
-   * Grace window: a concurrent request arriving with the old RT within the
-   * window gets the same new tokens back instead of a 401.
-   */
-  async rotateRefreshToken(params: RotateRefreshTokenParams): Promise<boolean> {
-    const {
-      oldRefreshToken,
-      newRefreshToken,
-      userId,
-      version,
-      ttl,
-      newTokens,
-    } = params;
-    const result = await this.client.eval(
-      ROTATE_REFRESH_TOKEN_SCRIPT,
-      3,
-      CACHE.AUTH.KEYS.REFRESH_TOKEN(this.hashToken(oldRefreshToken)),
-      CACHE.AUTH.KEYS.REFRESH_TOKEN(this.hashToken(newRefreshToken)),
-      CACHE.AUTH.KEYS.ROTATION_GRACE(this.hashToken(oldRefreshToken)),
-      JSON.stringify({ userId, version }),
-      ttl,
+  async setRotationGrace(
+    oldRefreshToken: string,
+    newTokens: TokenPair,
+  ): Promise<void> {
+    await this.client.set(
+      CACHE.AUTH.KEYS.ROTATION_GRACE(HashUtil.sha256(oldRefreshToken)),
       this.encryptGrace(oldRefreshToken, newTokens),
+      'EX',
       CACHE.AUTH.SETTINGS.ROTATION_GRACE_TTL,
     );
-    return result === 1;
   }
 
   async getRotationGrace(oldRefreshToken: string): Promise<TokenPair | null> {
     const val = await this.client.get(
-      CACHE.AUTH.KEYS.ROTATION_GRACE(this.hashToken(oldRefreshToken)),
+      CACHE.AUTH.KEYS.ROTATION_GRACE(HashUtil.sha256(oldRefreshToken)),
     );
     return val ? this.decryptGrace(oldRefreshToken, val) : null;
   }

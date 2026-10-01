@@ -5,6 +5,8 @@ export interface ICurrentUser {
   id: string;
   role: UserRole;
   ver: number;
+  /** Session the access token belongs to. */
+  sid: string;
 }
 
 export const CurrentUser = createParamDecorator(

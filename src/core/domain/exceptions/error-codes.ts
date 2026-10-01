@@ -169,4 +169,9 @@ export const AuthErrorCodes = {
     message: 'Too many requests',
     status: HttpStatus.TOO_MANY_REQUESTS,
   },
+  SESSION_NOT_FOUND: {
+    code: 'AUTH-007',
+    message: 'Session not found',
+    status: HttpStatus.NOT_FOUND,
+  },
 };

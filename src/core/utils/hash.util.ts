@@ -1,7 +1,12 @@
 import * as argon2 from 'argon2';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 
 export class HashUtil {
+  /** Deterministic hex digest for high-entropy values (tokens), where a slow password hash isn't needed. */
+  static sha256(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
+  }
+
   static async hashPassword(plainText: string): Promise<string> {
     // Standard config: Cân bằng tốc độ và bảo mật cho web (Khoảng 200-300ms)
     return argon2.hash(plainText, {

@@ -15,6 +15,15 @@ describe('HashUtil', () => {
     expect(isFalseMatch).toBe(false);
   });
 
+  it('should hash with sha256 deterministically', () => {
+    // Well-known digest of "abc"
+    expect(HashUtil.sha256('abc')).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    );
+    expect(HashUtil.sha256('abc')).toBe(HashUtil.sha256('abc'));
+    expect(HashUtil.sha256('abd')).not.toBe(HashUtil.sha256('abc'));
+  });
+
   it('should generate random token of given length', () => {
     const token = HashUtil.generateRandomToken(16);
     // 16 bytes = 32 hex characters

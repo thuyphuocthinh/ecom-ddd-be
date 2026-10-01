@@ -13,9 +13,14 @@ import {
   RefreshTokenHandler,
   LogoutHandler,
   LogoutAllHandler,
+  RevokeSessionHandler,
+  RevokeOtherSessionsHandler,
+  ListSessionsHandler,
   TokenIssuer,
 } from './application/index.js';
+import { PrismaSessionRepository } from './infrastructure/index.js';
 import { AuthController } from './presentation/index.js';
+import { SessionController } from './presentation/controllers/session.controller.js';
 
 const CommandHandlers = [
   RegisterHandler,
@@ -23,7 +28,11 @@ const CommandHandlers = [
   RefreshTokenHandler,
   LogoutHandler,
   LogoutAllHandler,
+  RevokeSessionHandler,
+  RevokeOtherSessionsHandler,
 ];
+
+const QueryHandlers = [ListSessionsHandler];
 
 @Global()
 @Module({
@@ -40,8 +49,15 @@ const CommandHandlers = [
       }),
     }),
   ],
-  controllers: [AuthController],
-  providers: [TokenIssuer, ...CommandHandlers, JwtAuthGuard, RolesGuard],
+  controllers: [AuthController, SessionController],
+  providers: [
+    TokenIssuer,
+    { provide: 'ISessionRepository', useClass: PrismaSessionRepository },
+    ...CommandHandlers,
+    ...QueryHandlers,
+    JwtAuthGuard,
+    RolesGuard,
+  ],
   // TokenStore comes from the global TokenModule (core), not from here
   exports: [JwtAuthGuard, RolesGuard, JwtModule],
 })

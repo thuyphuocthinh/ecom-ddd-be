@@ -48,12 +48,11 @@ export const CACHE = {
       ROTATION_GRACE_TTL: buildTTL('SECOND', 15), // grace window cho concurrent refresh
     },
     KEYS: {
-      BLACKLIST: (tokenHash: string) =>
-        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:blacklist:${tokenHash}`,
+      // Flag set when a session is revoked so its still-valid access tokens are refused at once
+      SESSION_REVOKED: (sessionId: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:session_revoked:${sessionId}`,
       TOKEN_VERSION: (userId: string) =>
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:version:${userId}`,
-      REFRESH_TOKEN: (tokenHash: string) =>
-        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:refresh:${tokenHash}`,
       ROTATION_GRACE: (tokenHash: string) =>
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:rotation_grace:${tokenHash}`,
     },
