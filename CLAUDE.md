@@ -54,21 +54,28 @@ Schema changes go through **Prisma Migrate**, not `prisma db push` — every cha
 ## Onboarding — how to use AI when joining this project
 1. Have the AI read [`../docs/architecture.md`](../docs/architecture.md) and this file first, then ask it to summarize the module boundaries in its own words. Verify it got the Aggregate Root rule and the CQRS command/query split right before trusting it with code.
 2. Pick one existing bounded context (`src/modules/catalog` is the most complete) and ask the AI to trace one full flow end to end: controller → command handler → domain entity → repository → outbox/RabbitMQ. This teaches the real data flow faster than reading file by file.
-3. Read an existing spec in [`../docs/specs/`](../docs/specs/) (e.g. `catalog_spec.md`) side by side with its implementation to see how spec sections map to actual code.
+3. Read an existing spec in `specs/features/` (e.g. `specs/features/catalog/spec.md`, `specs/features/auth-jwt-rbac/spec.md`) side by side with its implementation to see how spec sections map to actual code. `speckit-ai status` lists active works, ideas and finished features.
 4. Bring up the environment with `docker compose up -d` + `pnpm start:dev`, then hit an endpoint via Swagger to confirm the setup works before making changes.
 5. Check recent commits (`git log --oneline -20`) to see current conventions and what's actively in flight.
 
 ## New Feature Workflow — Spec-Driven Development (mandatory)
-This project enforces SDD via [`../.agents/skills/spec-driven-workflow/SKILL.md`](../.agents/skills/spec-driven-workflow/SKILL.md). Summary — do not skip steps:
+This project enforces SDD with the `speckit-ai` CLI (2.x) and the skills in `.agents/skills/` (`spec-create`, `spec-plan`, `spec-review`). Read `specs/_workflow.md` for the full cycle and gates. Summary — do not skip steps:
 
-1. **Write the spec first**, in `../docs/specs/<domain>_spec.md`. It must contain:
+```
+idea "X"                  → specs/ideas/x.md              (backlog, optional)
+start "X" [--affects=a]   → specs/active/x/               (work in progress)
+done                      → specs/features/<slug>/spec.md (finished; work files archived in specs/.history/)
+```
+
+1. **Write the spec first.** `npx speckit-ai start "<title>"` for a new feature, or `--affects=<feature>` to change an existing one, then write the spec in `specs/active/<name>/targets/<feature>.md` (structure from `specs/_template.md`). Besides the template sections, it must contain:
    - Business Flow (actors + purpose)
    - Use Cases split into Commands (writes) and Queries (reads)
    - A Mermaid sequence diagram (API → Controller → Command Handler → Domain Entity → Repository → Message Broker)
-   - Acceptance Criteria in Given–When–Then (BDD) format
+   - Acceptance Criteria in Given–When–Then format, one `### AC-n:` heading per criterion
 2. **Stop and get the spec approved** before writing any application code. No exceptions.
-3. **Implement strictly against the approved spec** — command/query names, entity behavior, and acceptance criteria should trace 1:1 back to the spec.
-4. **Changing existing logic?** Open the matching `*_spec.md` first, update the diagram/use cases/acceptance criteria to match the new requirement, get that re-approved, then change the code. Spec and code must never drift apart.
+3. **Implement strictly against the approved spec** — command/query names, entity behavior, and acceptance criteria should trace 1:1 back to the spec. Follow `plan.md` and `tasks.md` in the active work; tick tasks as you go.
+4. **Changing existing logic?** Use `start --affects=<feature>` (it copies the current spec into `targets/`), update the diagram/use cases/acceptance criteria, get that re-approved, then change the code. Spec and code must never drift apart.
+5. **Finish with the gates:** `npx speckit-ai lint`, then `npx speckit-ai done`. Never edit the `## Changelog` by hand, and never read or edit `specs/.history/`. Trivial bugfixes need only a clear commit message (see "Bugs and hotfixes" in `specs/_workflow.md`).
 
 ## Testing Strategy
 - `*.spec.ts` — unit tests, no DB/network, runs fully in memory (`pnpm test`)

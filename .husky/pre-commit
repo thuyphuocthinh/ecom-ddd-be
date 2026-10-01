@@ -1,1 +1,6 @@
 pnpm lint-staged
+
+# speckit-ai: lint specs (specs/ is local-only, so skip when it is not present)
+if [ -d specs ]; then
+  npx --yes speckit-ai@2 lint || exit 1
+fi
