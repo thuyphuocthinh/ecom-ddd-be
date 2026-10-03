@@ -72,18 +72,21 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Confirm the emailed code: creates the account and logs in',
+    description:
+      'The password must be the one sent to /auth/register. It proves the person confirming is the person who registered, so somebody who re-registered the address with their own password cannot take the account over.',
   })
   @ApiResponse({ status: HttpStatus.OK, type: AuthResponseDto })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
-    description: 'Wrong, expired or already used code',
+    description:
+      'Wrong, expired or already used code, or a password that differs from the one used to register (AUTH-011)',
   })
   async verifyEmail(
     @Body() dto: VerifyEmailDto,
     @ClientInfo() client: IClientInfo,
   ): Promise<AuthResponseDto> {
     return this.commandBus.execute(
-      new VerifyEmailCommand(dto.email, dto.code, client),
+      new VerifyEmailCommand(dto.email, dto.code, dto.password, client),
     );
   }
 

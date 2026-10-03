@@ -45,14 +45,15 @@ Content-Type: application/json
 
 
 ### 1b. Xác thực email bằng mã nhận được (đọc trong log của server) → tạo tài khoản và đăng nhập luôn
-# Sai mã → 400 (tối đa 5 lần nhập sai rồi mã bị huỷ); mã sống 10 phút.
+# Gửi kèm đúng mật khẩu đã dùng ở bước đăng ký (để chắc người nhập mã chính là người đăng ký). Sai mã 5 lần từ cùng một IP thì IP đó bị khoá với mã này; mã sống 10 phút.
 # Việc này cũng tạo một session cho "thiết bị" gọi nó.
 POST {{baseUrl}}/auth/verify-email
 Content-Type: application/json
 
 {
   "email": "{{email}}",
-  "code": "{{verificationCode}}"
+  "code": "{{verificationCode}}",
+  "password": "{{password}}"
 }
 
 

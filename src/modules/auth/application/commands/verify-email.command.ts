@@ -5,6 +5,7 @@ export class VerifyEmailCommand implements ICommand {
   constructor(
     public readonly email: string,
     public readonly code: string,
+    public readonly password: string,
     public readonly client: IClientInfo,
   ) {}
 }

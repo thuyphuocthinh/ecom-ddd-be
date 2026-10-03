@@ -76,13 +76,19 @@ describe('VerificationMailer', () => {
     expect(sender.send.mock.calls[0][0].subject).toContain('Cửa hàng An');
   });
 
-  it('does not fail when the provider does: the user can ask for the code again (AC-10)', async () => {
+  it('reports true once the provider accepted the message', async () => {
+    await expect(mailer.sendCode('a@example.com', '482915')).resolves.toBe(
+      true,
+    );
+  });
+
+  it('does not throw when the provider fails, but reports false: the user can ask for the code again (AC-10)', async () => {
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
     sender.send.mockRejectedValue(new Error('provider down'));
 
-    await expect(
-      mailer.sendCode('a@example.com', '482915'),
-    ).resolves.toBeUndefined();
+    await expect(mailer.sendCode('a@example.com', '482915')).resolves.toBe(
+      false,
+    );
   });
 
   it('does not log the provider message, which often quotes the recipient (AC-11)', async () => {

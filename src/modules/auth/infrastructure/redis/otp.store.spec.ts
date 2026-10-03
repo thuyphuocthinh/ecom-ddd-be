@@ -7,6 +7,7 @@ import { HashUtil } from '@/core/utils/hash.util.js';
 
 const EMAIL = 'new@example.com';
 const SUBJECT = HashUtil.sha256(EMAIL);
+const CLIENT = '203.0.113.7';
 
 describe('OtpStore', () => {
   let store: OtpStore;
@@ -80,23 +81,49 @@ describe('OtpStore', () => {
     });
   });
 
+  describe('releaseSend', () => {
+    it('runs one script over the cooldown and the hourly counter of that address', async () => {
+      client.eval.mockResolvedValue(1);
+
+      await store.releaseSend('REGISTER_EMAIL', EMAIL);
+
+      const args = client.eval.mock.calls[0];
+      expect(args[1]).toBe(2);
+      expect(args.slice(2)).toEqual([
+        CACHE.AUTH.KEYS.OTP_COOLDOWN('REGISTER_EMAIL', SUBJECT),
+        CACHE.AUTH.KEYS.OTP_SENT('REGISTER_EMAIL', SUBJECT),
+      ]);
+    });
+  });
+
   describe('fetchAndCountAttempt', () => {
-    it('returns the stored hash and the attempt number', async () => {
-      client.eval.mockResolvedValue(['hash-of-code', 2]);
+    it('returns the stored hash and the client attempt number', async () => {
+      client.eval.mockResolvedValue(['hash-of-code', 2, 7]);
 
       await expect(
-        store.fetchAndCountAttempt('REGISTER_EMAIL', EMAIL),
+        store.fetchAndCountAttempt('REGISTER_EMAIL', EMAIL, CLIENT),
       ).resolves.toEqual({ hash: 'hash-of-code', attempts: 2 });
-      expect(client.eval.mock.calls[0][3]).toBe(
-        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS,
-      );
     });
 
-    it('returns null when there is no live code or the limit was passed', async () => {
+    it('passes both limits and a hash of the client, never the raw IP', async () => {
+      client.eval.mockResolvedValue(['hash-of-code', 1, 1]);
+
+      await store.fetchAndCountAttempt('REGISTER_EMAIL', EMAIL, CLIENT);
+
+      const args = client.eval.mock.calls[0];
+      expect(args.slice(3)).toEqual([
+        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS,
+        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS_TOTAL,
+        HashUtil.sha256(CLIENT),
+      ]);
+      expect(JSON.stringify(args)).not.toContain(CLIENT);
+    });
+
+    it('returns null when there is no live code, the client is locked out or the total was passed', async () => {
       client.eval.mockResolvedValue(null);
 
       await expect(
-        store.fetchAndCountAttempt('REGISTER_EMAIL', EMAIL),
+        store.fetchAndCountAttempt('REGISTER_EMAIL', EMAIL, CLIENT),
       ).resolves.toBeNull();
     });
   });
@@ -127,7 +154,10 @@ describe('OtpStore', () => {
         store.saveCode('REGISTER_EMAIL', EMAIL, 'h'),
       ).rejects.toBeInstanceOf(ServiceUnavailableException);
       await expect(
-        store.fetchAndCountAttempt('REGISTER_EMAIL', EMAIL),
+        store.fetchAndCountAttempt('REGISTER_EMAIL', EMAIL, CLIENT),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      await expect(
+        store.releaseSend('REGISTER_EMAIL', EMAIL),
       ).rejects.toBeInstanceOf(ServiceUnavailableException);
       await expect(
         store.consume('REGISTER_EMAIL', EMAIL),

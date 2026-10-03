@@ -77,21 +77,35 @@ export class RegisterHandler implements ICommandHandler<RegisterCommand> {
     // address is still in its cooldown this throws 429 and the earlier pending
     // registration (and its password) stays exactly as it was.
     await this.otpService.reserveSend('REGISTER_EMAIL', command.email);
-    const code = await this.otpService.issue('REGISTER_EMAIL', command.email);
 
-    // 3. Keep the registration (password only as a hash) until the code is entered
-    const passwordHash = await HashUtil.hashPassword(command.plainPassword);
-    await this.pendingSignups.save(command.email, {
-      passwordHash,
-      displayName: command.displayName ?? null,
-    });
+    let code: string;
+    try {
+      code = await this.otpService.issue('REGISTER_EMAIL', command.email);
 
-    // 4. Email the code. A provider failure is logged, not fatal: the user can resend.
-    await this.mailer.sendCode(command.email, code);
+      // 3. Keep the registration (password only as a hash) until the code is entered
+      const passwordHash = await HashUtil.hashPassword(command.plainPassword);
+      await this.pendingSignups.save(command.email, {
+        passwordHash,
+        displayName: command.displayName ?? null,
+      });
+    } catch (error) {
+      // Nothing was stored for the user to act on: don't make them wait out the cooldown
+      await this.otpService.releaseSend('REGISTER_EMAIL', command.email);
+      throw error;
+    }
+
+    // 4. Email the code. A provider failure is not fatal: the registration is saved and the
+    // user can ask again at once, so the slot is given back and the reply says "no wait".
+    const delivered = await this.mailer.sendCode(command.email, code);
+    if (!delivered) {
+      await this.otpService.releaseSend('REGISTER_EMAIL', command.email);
+    }
 
     return {
       verificationRequired: true,
-      resendAvailableInSeconds: CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN,
+      resendAvailableInSeconds: delivered
+        ? CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN
+        : 0,
       verificationExpiresInSeconds: CACHE.AUTH.SETTINGS.PENDING_SIGNUP_TTL,
     };
   }

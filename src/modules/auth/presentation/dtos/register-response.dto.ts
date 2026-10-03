@@ -9,7 +9,8 @@ export class RegisterResponseDto {
   verificationRequired!: true;
 
   @ApiProperty({
-    description: 'Seconds to wait before another code can be requested',
+    description:
+      'Seconds to wait before another code can be requested; 0 when the email could not be sent, so the user can ask again at once',
     example: 300,
   })
   resendAvailableInSeconds!: number;
@@ -24,7 +25,8 @@ export class RegisterResponseDto {
 
 export class ResendVerificationResponseDto {
   @ApiProperty({
-    description: 'Seconds to wait before another code can be requested',
+    description:
+      'Seconds to wait before another code can be requested; 0 when the email could not be sent, so the user can ask again at once',
     example: 300,
   })
   resendAvailableInSeconds!: number;

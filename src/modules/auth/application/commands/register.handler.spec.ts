@@ -24,6 +24,7 @@ describe('RegisterHandler', () => {
   let otpService: {
     reserveSend: ReturnType<typeof vi.fn>;
     issue: ReturnType<typeof vi.fn>;
+    releaseSend: ReturnType<typeof vi.fn>;
   };
   let pendingSignups: { save: ReturnType<typeof vi.fn> };
   let mailer: { sendCode: ReturnType<typeof vi.fn> };
@@ -39,6 +40,9 @@ describe('RegisterHandler', () => {
         calls.push('issue code');
         return '482915';
       }),
+      releaseSend: vi.fn().mockImplementation(async () => {
+        calls.push('release send');
+      }),
     };
     pendingSignups = {
       save: vi.fn().mockImplementation(async () => {
@@ -48,6 +52,7 @@ describe('RegisterHandler', () => {
     mailer = {
       sendCode: vi.fn().mockImplementation(async () => {
         calls.push('send email');
+        return true;
       }),
     };
 

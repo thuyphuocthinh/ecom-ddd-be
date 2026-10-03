@@ -5,6 +5,7 @@ import { VerifyEmailHandler } from './verify-email.handler.js';
 import { VerifyEmailCommand } from './verify-email.command.js';
 import type { IUserRepository } from '../../../users/domain/index.js';
 import { AuthErrorCodes, UserErrorCodes } from '@/core/index.js';
+import { HashUtil } from '@/core/utils/hash.util.js';
 import type { OtpService } from '../services/otp.service.js';
 import type { SessionIssuer } from '../services/session-issuer.service.js';
 import type { PendingSignupStore } from '../../infrastructure/index.js';
@@ -12,8 +13,9 @@ import type { PendingSignupStore } from '../../infrastructure/index.js';
 const CLIENT = { ip: '203.0.113.7', userAgent: 'Chrome' };
 const TOKENS = { accessToken: 'at', refreshToken: 'rt' };
 const PENDING = { passwordHash: '$argon2id$stored-hash', displayName: 'Jane' };
-const verify = () =>
-  new VerifyEmailCommand('new@example.com', '482915', CLIENT);
+const PASSWORD = 'Sunny-Giraffe-42!';
+const verify = (password = PASSWORD) =>
+  new VerifyEmailCommand('new@example.com', '482915', password, CLIENT);
 
 describe('VerifyEmailHandler', () => {
   let handler: VerifyEmailHandler;
@@ -35,6 +37,11 @@ describe('VerifyEmailHandler', () => {
     );
 
   beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(HashUtil, 'comparePassword').mockImplementation(async () => {
+      calls.push('check password');
+      return true;
+    });
     calls = [];
     userRepo = {
       save: vi.fn().mockImplementation(async () => {
@@ -97,15 +104,46 @@ describe('VerifyEmailHandler', () => {
       'REGISTER_EMAIL',
       'new@example.com',
       '482915',
+      CLIENT.ip,
     );
   });
 
-  it('runs in a safe order: check, read pending, use the code up, create, drop the pending registration, log in', async () => {
+  it('checks the password against the hash of the waiting registration (AC-15)', async () => {
+    await handler.execute(verify());
+
+    expect(HashUtil.comparePassword).toHaveBeenCalledWith(
+      PASSWORD,
+      PENDING.passwordHash,
+    );
+  });
+
+  it('refuses a password that differs from the registration, leaving the code usable and creating nothing (AC-15)', async () => {
+    vi.mocked(HashUtil.comparePassword).mockResolvedValue(false);
+
+    await expect(
+      handler.execute(verify('Another-Password-9')),
+    ).rejects.toSatisfy(
+      (e: any) => e.code === AuthErrorCodes.REGISTRATION_PASSWORD_MISMATCH.code,
+    );
+    expect(otpService.consume).not.toHaveBeenCalled();
+    expect(userRepo.save).not.toHaveBeenCalled();
+    expect(sessionIssuer.start).not.toHaveBeenCalled();
+  });
+
+  it('does not check the password for a wrong code, so it cannot be used to burn CPU (AC-15)', async () => {
+    otpService.verify.mockResolvedValue(false);
+
+    await expectInvalidCode(handler.execute(verify()));
+    expect(HashUtil.comparePassword).not.toHaveBeenCalled();
+  });
+
+  it('runs in a safe order: check the code, read pending, check the password, use the code up, create, drop the pending registration, log in', async () => {
     await handler.execute(verify());
 
     expect(calls).toEqual([
       'verify code',
       'read pending',
+      'check password',
       'consume code',
       'save user',
       'delete pending',

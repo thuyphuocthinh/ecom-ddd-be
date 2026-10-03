@@ -192,4 +192,12 @@ export const AuthErrorCodes = {
     message: 'Password is too easy to guess',
     status: HttpStatus.BAD_REQUEST,
   },
+  // verify-email: the code is right but the password differs from the one the waiting registration was
+  // made with, e.g. someone else registered this address meanwhile. Only the mailbox owner gets this far.
+  REGISTRATION_PASSWORD_MISMATCH: {
+    code: 'AUTH-011',
+    message:
+      'Password does not match the registration this code belongs to; register again',
+    status: HttpStatus.BAD_REQUEST,
+  },
 };

@@ -16,6 +16,7 @@ describe('ResendVerificationHandler', () => {
   let otpService: {
     reserveSend: ReturnType<typeof vi.fn>;
     issue: ReturnType<typeof vi.fn>;
+    releaseSend: ReturnType<typeof vi.fn>;
   };
   let pendingSignups: { get: ReturnType<typeof vi.fn> };
   let mailer: { sendCode: ReturnType<typeof vi.fn> };
@@ -24,11 +25,12 @@ describe('ResendVerificationHandler', () => {
     otpService = {
       reserveSend: vi.fn().mockResolvedValue(undefined),
       issue: vi.fn().mockResolvedValue('482915'),
+      releaseSend: vi.fn().mockResolvedValue(undefined),
     };
     pendingSignups = {
       get: vi.fn().mockResolvedValue({ passwordHash: 'h', displayName: null }),
     };
-    mailer = { sendCode: vi.fn().mockResolvedValue(undefined) };
+    mailer = { sendCode: vi.fn().mockResolvedValue(true) };
 
     handler = new ResendVerificationHandler(
       otpService as unknown as OtpService,
@@ -88,6 +90,34 @@ describe('ResendVerificationHandler', () => {
       (e: any) => e.code === AuthErrorCodes.RATE_LIMIT_EXCEEDED.code,
     );
     expect(otpService.issue).not.toHaveBeenCalled();
+    expect(mailer.sendCode).not.toHaveBeenCalled();
+  });
+
+  it('gives the slot back and says no wait when the email could not be sent, so the user can ask again at once (AC-10)', async () => {
+    mailer.sendCode.mockResolvedValue(false);
+
+    const result = await handler.execute(resend());
+
+    expect(result).toEqual({ resendAvailableInSeconds: 0 });
+    expect(otpService.releaseSend).toHaveBeenCalledWith(
+      'REGISTER_EMAIL',
+      'new@example.com',
+    );
+  });
+
+  it('keeps the slot when the email went out (AC-5)', async () => {
+    await handler.execute(resend());
+
+    expect(otpService.releaseSend).not.toHaveBeenCalled();
+  });
+
+  it('gives the slot back when the code could not be stored, and still fails (AC-10)', async () => {
+    otpService.issue.mockRejectedValue(new ServiceUnavailableException());
+
+    await expect(handler.execute(resend())).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(otpService.releaseSend).toHaveBeenCalledOnce();
     expect(mailer.sendCode).not.toHaveBeenCalled();
   });
 

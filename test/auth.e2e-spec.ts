@@ -57,10 +57,17 @@ function startRegistration(
     .send({ email, password });
 }
 
-function verifyEmail(app: INestApplication, email: string, code: string) {
+const DEFAULT_PASSWORD = 'Sunny-Giraffe-42!';
+
+function verifyEmail(
+  app: INestApplication,
+  email: string,
+  code: string,
+  password = DEFAULT_PASSWORD,
+) {
   return request(app.getHttpServer())
     .post(`${API}/auth/verify-email`)
-    .send({ email, code });
+    .send({ email, code, password });
 }
 
 /** Register a new user (including the email confirmation) and return { email, password } */
@@ -70,7 +77,7 @@ async function registerUser(
   password = 'Sunny-Giraffe-42!',
 ): Promise<{ email: string; password: string }> {
   await startRegistration(app, email, password).expect(202);
-  await verifyEmail(app, email, codeSentTo(email)).expect(200);
+  await verifyEmail(app, email, codeSentTo(email), password).expect(200);
   // Confirming the email also logs the new user in; tests that want sessions create their own
   await app.get(PrismaService).session.deleteMany({
     where: {
@@ -1010,8 +1017,11 @@ describe('Auth (e2e)', () => {
     });
   });
 
-  describe('Verification AC-3: wrong codes lock the code after 5 tries', () => {
-    it('answers 400 with the same message each time; after the 5th, even the right code fails', async () => {
+  describe('Verification AC-3: wrong codes lock the guesser out, not the owner', () => {
+    const otpKey = () =>
+      CACHE.AUTH.KEYS.OTP('REGISTER_EMAIL', sha256('new@example.com'));
+
+    it('answers 400 with the same message each time; after 5 wrong tries even the right code fails for that client', async () => {
       await startRegistration(app, 'new@example.com').expect(202);
       const code = codeSentTo('new@example.com');
       const wrong = wrongCodeFor(code);
@@ -1027,6 +1037,30 @@ describe('Auth (e2e)', () => {
 
       await verifyEmail(app, 'new@example.com', code).expect(400);
       expect(await prisma.user.count()).toBe(0);
+    });
+
+    it('a client that used up its guesses does not destroy the code: another client can still confirm it', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+      // Somebody else (another IP) has already used up all their guesses
+      await redisStore
+        .getClient()
+        .hset(otpKey(), `c:${sha256('198.51.100.9')}`, 5);
+
+      await verifyEmail(app, 'new@example.com', code).expect(200);
+    });
+
+    it('destroys the code once all clients together have guessed too often', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+      await redisStore
+        .getClient()
+        .hset(otpKey(), 'attempts', CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS_TOTAL);
+
+      await verifyEmail(app, 'new@example.com', wrongCodeFor(code)).expect(400);
+
+      await verifyEmail(app, 'new@example.com', code).expect(400);
+      expect(await redisStore.getClient().exists(otpKey())).toBe(0);
     });
   });
 
@@ -1184,9 +1218,19 @@ describe('Auth (e2e)', () => {
       const secondCode = codeSentTo('new@example.com');
 
       if (firstCode !== secondCode) {
-        await verifyEmail(app, 'new@example.com', firstCode).expect(400);
+        await verifyEmail(
+          app,
+          'new@example.com',
+          firstCode,
+          'SecondPassword2!',
+        ).expect(400);
       }
-      await verifyEmail(app, 'new@example.com', secondCode).expect(200);
+      await verifyEmail(
+        app,
+        'new@example.com',
+        secondCode,
+        'SecondPassword2!',
+      ).expect(200);
       await loginUser(app, 'new@example.com', 'SecondPassword2!');
       await request(app.getHttpServer())
         .post(`${API}/auth/login`)
@@ -1206,19 +1250,86 @@ describe('Auth (e2e)', () => {
         'SecondPassword2!',
       ).expect(429);
 
-      await verifyEmail(app, 'new@example.com', code).expect(200);
+      await verifyEmail(app, 'new@example.com', code, 'FirstPassword1!').expect(
+        200,
+      );
       await loginUser(app, 'new@example.com', 'FirstPassword1!');
+    });
+  });
+
+  describe('Verification AC-15: the password must match the registration', () => {
+    it('a stranger who re-registered the address cannot take the account over: the owner confirming the new code with their own password is refused', async () => {
+      // The owner registers; before confirming, somebody else re-registers the address with their own password
+      await startRegistration(
+        app,
+        'new@example.com',
+        'OwnersPassword1!',
+      ).expect(202);
+      await forgetCooldown('new@example.com');
+      await startRegistration(
+        app,
+        'new@example.com',
+        'StrangersPassword2!',
+      ).expect(202);
+      // The new code goes to the owner's mailbox
+      const code = codeSentTo('new@example.com');
+
+      const res = await verifyEmail(
+        app,
+        'new@example.com',
+        code,
+        'OwnersPassword1!',
+      ).expect(400);
+
+      expect(res.body.code).toBe('AUTH-011');
+      expect(await prisma.user.count()).toBe(0);
+    });
+
+    it('a refused password leaves the code usable: the right password then works', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+
+      await verifyEmail(
+        app,
+        'new@example.com',
+        code,
+        'NotThePassword-9',
+      ).expect(400);
+
+      await verifyEmail(app, 'new@example.com', code).expect(200);
+    });
+
+    it('a wrong code is refused with the generic error, not a password error, so the password is never judged first', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+
+      const res = await verifyEmail(
+        app,
+        'new@example.com',
+        wrongCodeFor(code),
+        'NotThePassword-9',
+      ).expect(400);
+
+      expect(res.body.code).toBe('AUTH-008');
+    });
+
+    it('verify-email without a password is rejected', async () => {
+      await request(app.getHttpServer())
+        .post(`${API}/auth/verify-email`)
+        .send({ email: 'new@example.com', code: '123456' })
+        .expect(400);
     });
   });
 
   describe('Verification AC-10: the email provider fails', () => {
     it('still answers 202 and keeps the registration, so a later resend completes it', async () => {
       mailbox.failing = true;
-      await startRegistration(app, 'new@example.com').expect(202);
+      const res = await startRegistration(app, 'new@example.com').expect(202);
       expect(mailbox.sent).toHaveLength(0);
+      // Nothing was delivered, so the user is not made to wait for the cooldown
+      expect(res.body.data.resendAvailableInSeconds).toBe(0);
 
       mailbox.failing = false;
-      await forgetCooldown('new@example.com');
       await resendFor('new@example.com').expect(202);
       await verifyEmail(
         app,

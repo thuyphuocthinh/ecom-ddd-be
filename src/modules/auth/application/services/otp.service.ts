@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { timingSafeEqual } from 'crypto';
 import { AuthErrorCodes } from '@/core/domain/exceptions/error-codes.js';
 import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
@@ -20,6 +20,7 @@ import { OtpStore } from '../../infrastructure/index.js';
  */
 @Injectable()
 export class OtpService {
+  private readonly logger = new Logger(OtpService.name);
   private readonly key: Buffer;
 
   constructor(
@@ -48,6 +49,15 @@ export class OtpService {
     }
   }
 
+  /** Gives back the cooldown and hourly slot of a send that did not happen. Best effort. */
+  async releaseSend(purpose: OtpPurpose, email: string): Promise<void> {
+    try {
+      await this.store.releaseSend(purpose, email);
+    } catch (error: any) {
+      this.logger.warn(`Could not release the send slot: ${error.message}`);
+    }
+  }
+
   /** Creates a code for `email` and stores its hash. The raw code is returned once, to be emailed. */
   async issue(purpose: OtpPurpose, email: string): Promise<string> {
     const code = HashUtil.generateOTP(CACHE.AUTH.SETTINGS.OTP_LENGTH);
@@ -60,27 +70,30 @@ export class OtpService {
   }
 
   /**
-   * Checks a guess. Each call counts as an attempt; after the allowed number of
-   * wrong ones the code is destroyed, so it can't be brute-forced. Does not use the
-   * code up: call `consume` once the rest of the flow is ready to go ahead.
+   * Checks a guess made by `clientId` (the caller's IP). Every call counts as an attempt:
+   * a client gets a few per code and is then refused, and when all clients together pass
+   * the total the code is destroyed, so it can't be brute-forced. One client running out
+   * of guesses does not touch the code for anyone else. Does not use the code up: call
+   * `consume` once the rest of the flow is ready to go ahead.
    */
   async verify(
     purpose: OtpPurpose,
     email: string,
     code: string,
+    clientId: string,
   ): Promise<boolean> {
-    const entry = await this.store.fetchAndCountAttempt(purpose, email);
+    const entry = await this.store.fetchAndCountAttempt(
+      purpose,
+      email,
+      clientId,
+    );
     if (!entry) return false;
 
     const expected = Buffer.from(entry.hash, 'hex');
     const actual = Buffer.from(this.digest(purpose, email, code), 'hex');
-    const matches =
-      expected.length === actual.length && timingSafeEqual(expected, actual);
-
-    if (!matches && entry.attempts >= CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS) {
-      await this.store.invalidate(purpose, email);
-    }
-    return matches;
+    return (
+      expected.length === actual.length && timingSafeEqual(expected, actual)
+    );
   }
 
   /** Uses the code up. True for exactly one of several concurrent callers. */

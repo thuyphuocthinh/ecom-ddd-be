@@ -9,7 +9,7 @@ import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
 import { buildVerificationEmail } from './verification-email.js';
 
 /**
- * Emails a registration code. A failed send is logged and swallowed on purpose:
+ * Emails a registration code. A failed send is logged and reported as `false`, not thrown:
  * the pending registration is already saved and the code already stored, so the
  * user can simply ask for the code again. Failing the request here would turn a
  * provider outage into a lost registration.
@@ -23,7 +23,8 @@ export class VerificationMailer {
     @Inject(appConfig.KEY) private readonly app: AppConfig,
   ) {}
 
-  async sendCode(email: string, code: string): Promise<void> {
+  /** True when the provider accepted the message. */
+  async sendCode(email: string, code: string): Promise<boolean> {
     try {
       await this.emailSender.send(
         buildVerificationEmail({
@@ -33,6 +34,7 @@ export class VerificationMailer {
           validForMinutes: CACHE.AUTH.SETTINGS.OTP_TTL / 60,
         }),
       );
+      return true;
     } catch (error: any) {
       // Neither the code nor the address goes into the log. SMTP error text often quotes the
       // recipient ("550 5.1.1 <a@x.com> ..."), so only the error type and codes are logged.
@@ -42,6 +44,7 @@ export class VerificationMailer {
       this.logger.error(
         `Could not send the verification email: ${reason || 'unknown error'}`,
       );
+      return false;
     }
   }
 }

@@ -1,4 +1,11 @@
-import { IsEmail, IsNotEmpty, Matches, MaxLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { NormalizeEmail } from './normalize-email.js';
 
@@ -16,4 +23,16 @@ export class VerifyEmailDto {
   })
   @Matches(/^\d{6}$/, { message: 'code must be 6 digits' })
   code!: string;
+
+  @ApiProperty({
+    example: 'k9#Tq2$vLm8x',
+    description: 'The password given when registering',
+    minLength: 8,
+    maxLength: 128,
+  })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  @IsNotEmpty()
+  password!: string;
 }

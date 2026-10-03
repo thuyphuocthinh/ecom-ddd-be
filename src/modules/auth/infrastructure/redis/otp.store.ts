@@ -41,19 +41,41 @@ const SAVE_CODE_SCRIPT = `
   return 1
 `;
 
-// Count this guess and hand back the stored hash, or nothing if there is no live code.
-// The guess that goes over the limit destroys the code instead of being compared.
+// Count this guess and hand back the stored hash, or nothing if there is no live code or this
+// client is locked out. Guesses are counted per client (ARGV[3]) AND in total:
+//  - a client that used up its own guesses is refused without touching the code, so one
+//    person typing wrong codes (or an attacker with one address) can't destroy somebody
+//    else's code;
+//  - the total cap destroys the code when many clients together keep guessing, which bounds
+//    a distributed brute force. Counters live in the code's own hash, so a new code resets them.
 const COUNT_ATTEMPT_SCRIPT = `
   local hash = redis.call("HGET", KEYS[1], "hash")
   if not hash then
     return false
   end
-  local attempts = redis.call("HINCRBY", KEYS[1], "attempts", 1)
-  if attempts > tonumber(ARGV[1]) then
+  local field = "c:" .. ARGV[3]
+  local mine = tonumber(redis.call("HGET", KEYS[1], field) or "0")
+  if mine >= tonumber(ARGV[1]) then
+    return false
+  end
+  local total = redis.call("HINCRBY", KEYS[1], "attempts", 1)
+  if total > tonumber(ARGV[2]) then
     redis.call("DEL", KEYS[1])
     return false
   end
-  return { hash, attempts }
+  mine = redis.call("HINCRBY", KEYS[1], field, 1)
+  return { hash, mine, total }
+`;
+
+// Give back what reserveSend took: the cooldown, and one of the hourly sends. For when the
+// code could not be stored or delivered, so the user is not made to wait for nothing.
+const RELEASE_SEND_SCRIPT = `
+  redis.call("DEL", KEYS[1])
+  local sent = tonumber(redis.call("GET", KEYS[2]) or "0")
+  if sent > 0 then
+    redis.call("DECR", KEYS[2])
+  end
+  return 1
 `;
 
 export type SendReservation = 'RESERVED' | 'COOLDOWN' | 'LIMIT';
@@ -65,7 +87,7 @@ export interface SendReservationResult {
 }
 
 /**
- * Redis state of one-time codes: the keyed hash of the code, its wrong-guess counter,
+ * Redis state of one-time codes: the keyed hash of the code, its guess counters,
  * and the send cooldown/allowance. It never sees a raw code. Every method rejects
  * (as a 503) when Redis fails.
  */
@@ -108,6 +130,19 @@ export class OtpStore {
     };
   }
 
+  /** Undoes a `reserveSend` whose code never reached the user. */
+  async releaseSend(purpose: OtpPurpose, email: string): Promise<void> {
+    const subject = this.subject(email);
+    await orServiceUnavailable(this.logger, () =>
+      this.client.eval(
+        RELEASE_SEND_SCRIPT,
+        2,
+        CACHE.AUTH.KEYS.OTP_COOLDOWN(purpose, subject),
+        CACHE.AUTH.KEYS.OTP_SENT(purpose, subject),
+      ),
+    );
+  }
+
   async saveCode(
     purpose: OtpPurpose,
     email: string,
@@ -124,9 +159,11 @@ export class OtpStore {
     );
   }
 
+  /** `clientId` identifies who is guessing (the caller's IP), so guesses are limited per client. */
   async fetchAndCountAttempt(
     purpose: OtpPurpose,
     email: string,
+    clientId: string,
   ): Promise<{ hash: string; attempts: number } | null> {
     const result = await orServiceUnavailable(this.logger, () =>
       this.client.eval(
@@ -134,6 +171,8 @@ export class OtpStore {
         1,
         CACHE.AUTH.KEYS.OTP(purpose, this.subject(email)),
         CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS,
+        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS_TOTAL,
+        HashUtil.sha256(clientId),
       ),
     );
     if (!Array.isArray(result)) return null;
@@ -149,9 +188,5 @@ export class OtpStore {
       this.client.del(CACHE.AUTH.KEYS.OTP(purpose, this.subject(email))),
     );
     return deleted === 1;
-  }
-
-  async invalidate(purpose: OtpPurpose, email: string): Promise<void> {
-    await this.consume(purpose, email);
   }
 }

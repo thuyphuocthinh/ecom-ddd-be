@@ -49,7 +49,8 @@ export const CACHE = {
       // One-time codes sent by email (see auth-verification spec)
       OTP_LENGTH: 6,
       OTP_TTL: buildTTL('MINUTE', 10),
-      OTP_MAX_ATTEMPTS: 5, // wrong guesses before the code is destroyed
+      OTP_MAX_ATTEMPTS: 5, // guesses one client (IP) gets per code before it is locked out of that code
+      OTP_MAX_ATTEMPTS_TOTAL: 30, // guesses from all clients together before the code is destroyed
       OTP_RESEND_COOLDOWN: buildTTL('MINUTE', 5),
       OTP_MAX_SENDS_PER_HOUR: 5, // per email address
       OTP_SENDS_WINDOW: buildTTL('HOUR', 1),

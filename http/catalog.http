@@ -51,7 +51,8 @@ Content-Type: application/json
 
 {
   "email": "{{adminEmail}}",
-  "code": "{{verificationCode}}"
+  "code": "{{verificationCode}}",
+  "password": "{{adminPassword}}"
 }
 
 
