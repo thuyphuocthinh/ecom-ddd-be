@@ -17,6 +17,7 @@ describe('AllExceptionsFilter', () => {
   let filter: AllExceptionsFilter;
   let json: ReturnType<typeof vi.fn>;
   let status: ReturnType<typeof vi.fn>;
+  let setHeader: ReturnType<typeof vi.fn>;
   let host: ArgumentsHost;
 
   const respond = (exception: unknown) => {
@@ -30,9 +31,10 @@ describe('AllExceptionsFilter', () => {
   beforeEach(() => {
     json = vi.fn();
     status = vi.fn().mockReturnValue({ json });
+    setHeader = vi.fn();
     host = {
       switchToHttp: () => ({
-        getResponse: () => ({ status }),
+        getResponse: () => ({ status, setHeader }),
         getRequest: () => ({ method: 'POST', url: '/api/v1/auth/register' }),
       }),
     } as unknown as ArgumentsHost;
@@ -55,6 +57,24 @@ describe('AllExceptionsFilter', () => {
       message: 'Invalid email or password',
       traceId: 'trace-1',
     });
+  });
+
+  it('tells the client how long to wait: in the body and in the Retry-After header', () => {
+    const { status: s, body } = respond(
+      new DomainException(AuthErrorCodes.RATE_LIMIT_EXCEEDED, {
+        retryAfterSeconds: 217.2,
+      }),
+    );
+
+    expect(s).toBe(HttpStatus.TOO_MANY_REQUESTS);
+    expect(body.errors).toEqual({ retryAfterSeconds: 217.2 });
+    expect(setHeader).toHaveBeenCalledWith('Retry-After', '218');
+  });
+
+  it('sets no Retry-After header when the error carries no wait time', () => {
+    respond(new DomainException(AuthErrorCodes.INVALID_CREDENTIALS, 'nope'));
+
+    expect(setHeader).not.toHaveBeenCalled();
   });
 
   it('keeps the message of an HttpException', () => {

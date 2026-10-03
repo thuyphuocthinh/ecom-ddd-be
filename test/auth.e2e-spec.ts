@@ -7,7 +7,9 @@ import {
   AllExceptionsFilter,
   ResponseInterceptor,
   CACHE,
+  EMAIL_SENDER,
 } from './../src/core/index.js';
+import type { EmailMessage } from './../src/core/index.js';
 import { createHash } from 'crypto';
 import { ClsService } from 'nestjs-cls';
 import { JwtService } from '@nestjs/jwt';
@@ -18,16 +20,65 @@ import { JwtService } from '@nestjs/jwt';
 
 const API = '/api/v1';
 
-/** Register a new user and return { email, password } */
+/**
+ * Stands in for the real email provider: keeps what would have been sent, so a test can
+ * read the code, and can be told to fail like a provider outage.
+ */
+const mailbox = {
+  sent: [] as EmailMessage[],
+  failing: false,
+  async send(message: EmailMessage): Promise<void> {
+    if (this.failing) throw new Error('provider down');
+    this.sent.push(message);
+  },
+};
+
+/** The 6-digit code in the latest email sent to `email` */
+function codeSentTo(email: string): string {
+  const address = email.trim().toLowerCase();
+  const message = [...mailbox.sent].reverse().find((m) => m.to === address);
+  const match = message?.text.match(/\b(\d{6})\b/);
+  if (!match) throw new Error(`No code was emailed to ${email}`);
+  return match[1];
+}
+
+/** A code of the right shape that is not `code` */
+const wrongCodeFor = (code: string) =>
+  code === '000000' ? '111111' : '000000';
+
+/** Start a registration (code gets emailed, no account yet) */
+function startRegistration(
+  app: INestApplication,
+  email: string,
+  password = 'Sunny-Giraffe-42!',
+) {
+  return request(app.getHttpServer())
+    .post(`${API}/auth/register`)
+    .send({ email, password });
+}
+
+function verifyEmail(app: INestApplication, email: string, code: string) {
+  return request(app.getHttpServer())
+    .post(`${API}/auth/verify-email`)
+    .send({ email, code });
+}
+
+/** Register a new user (including the email confirmation) and return { email, password } */
 async function registerUser(
   app: INestApplication,
   email = `test-${Date.now()}@example.com`,
-  password = 'Password123!',
+  password = 'Sunny-Giraffe-42!',
 ): Promise<{ email: string; password: string }> {
-  await request(app.getHttpServer())
-    .post(`${API}/auth/register`)
-    .send({ email, password })
-    .expect(201);
+  await startRegistration(app, email, password).expect(202);
+  await verifyEmail(app, email, codeSentTo(email)).expect(200);
+  // Confirming the email also logs the new user in; tests that want sessions create their own
+  await app.get(PrismaService).session.deleteMany({
+    where: {
+      user: {
+        credentials: { some: { identifier: email.trim().toLowerCase() } },
+      },
+    },
+  });
   return { email, password };
 }
 
@@ -81,11 +132,18 @@ describe('Auth (e2e)', () => {
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(EMAIL_SENDER)
+      .useValue(mailbox)
+      .compile();
 
     app = module.createNestApplication();
     app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
     );
     const clsService = app.get(ClsService);
     app.useGlobalFilters(new AllExceptionsFilter(clsService));
@@ -114,6 +172,8 @@ describe('Auth (e2e)', () => {
     await prisma.userCredential.deleteMany();
     await prisma.user.deleteMany();
     await redisStore.getClient().flushdb();
+    mailbox.sent.length = 0;
+    mailbox.failing = false;
   });
 
   afterAll(async () => {
@@ -121,36 +181,44 @@ describe('Auth (e2e)', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // AC-1: Register — success
+  // AC-1: Register — success (two steps: code by email, then verify)
   // ───────────────────────────────────────────────────────────────────────────
-  describe('AC-1: POST /auth/register — success', () => {
-    it('returns 201 Created and the new userId', async () => {
-      const res = await request(app.getHttpServer())
-        .post(`${API}/auth/register`)
-        .send({ email: 'new@example.com', password: 'Password123!' })
-        .expect(201);
+  describe('AC-1: register then verify-email — creates the account', () => {
+    it('register answers 202 and creates no account; verify-email then creates it and returns tokens', async () => {
+      const res = await startRegistration(app, 'new@example.com').expect(202);
 
-      expect(res.body).toMatchObject({ statusCode: 201 });
-      expect(typeof res.body.data.userId).toBe('string');
-      expect(res.body.data.userId.length).toBeGreaterThan(0);
+      expect(res.body.data).toEqual({
+        verificationRequired: true,
+        resendAvailableInSeconds: CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN,
+        verificationExpiresInSeconds: CACHE.AUTH.SETTINGS.PENDING_SIGNUP_TTL,
+      });
+      expect(await prisma.user.count()).toBe(0);
+
+      const verified = await verifyEmail(
+        app,
+        'new@example.com',
+        codeSentTo('new@example.com'),
+      ).expect(200);
+
+      expect(typeof verified.body.data.accessToken).toBe('string');
+      expect(typeof verified.body.data.refreshToken).toBe('string');
+      expect(await prisma.user.count()).toBe(1);
     });
   });
 
   // ───────────────────────────────────────────────────────────────────────────
   // AC-2: Register — duplicate email
   // ───────────────────────────────────────────────────────────────────────────
-  describe('AC-2: POST /auth/register — duplicate email → 409', () => {
-    it('returns 409 Conflict with a generic message (no email in message body)', async () => {
+  describe('AC-2: POST /auth/register — email that already has an account → 409', () => {
+    it('returns 409 Conflict with a generic message, and sends no code', async () => {
       await registerUser(app, 'dup@example.com');
+      mailbox.sent.length = 0;
 
-      const res = await request(app.getHttpServer())
-        .post(`${API}/auth/register`)
-        .send({ email: 'dup@example.com', password: 'Password123!' })
-        .expect(409);
+      const res = await startRegistration(app, 'dup@example.com').expect(409);
 
       // Error message MUST NOT reveal the exact email
-      const bodyStr = JSON.stringify(res.body);
-      expect(bodyStr).not.toContain('dup@example.com');
+      expect(JSON.stringify(res.body)).not.toContain('dup@example.com');
+      expect(mailbox.sent).toHaveLength(0);
     });
   });
 
@@ -158,35 +226,96 @@ describe('Auth (e2e)', () => {
     it('treats A@x.com and a@x.com as the same account (409), and login works with either casing', async () => {
       await registerUser(app, 'Mixed.Case@Example.com');
 
-      await request(app.getHttpServer())
-        .post(`${API}/auth/register`)
-        .send({ email: 'mixed.case@example.com', password: 'Password123!' })
-        .expect(409);
+      await startRegistration(app, 'mixed.case@example.com').expect(409);
 
       await request(app.getHttpServer())
         .post(`${API}/auth/login`)
-        .send({ email: '  MIXED.CASE@example.com ', password: 'Password123!' })
+        .send({
+          email: '  MIXED.CASE@example.com ',
+          password: 'Sunny-Giraffe-42!',
+        })
         .expect(200);
     });
   });
 
-  describe('AC-2c: concurrent registration of the same email', () => {
-    it('yields exactly one 201 and one 409 — never a 500, never a leaked DB error', async () => {
-      const send = () =>
-        request(app.getHttpServer())
-          .post(`${API}/auth/register`)
-          .send({ email: 'race@example.com', password: 'Password123!' });
+  // ───────────────────────────────────────────────────────────────────────────
+  // Password policy: strength is judged when a password is chosen, never on login
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('Password policy', () => {
+    it('refuses a common password with 400 AUTH-010 and the reason, sending no code', async () => {
+      const res = await startRegistration(
+        app,
+        'new@example.com',
+        'Password123!',
+      ).expect(400);
 
-      const results = await Promise.all([send(), send()]);
-      const statuses = results.map((r) => r.status).sort();
-
-      expect(statuses).toEqual([201, 409]);
-      for (const r of results) {
-        expect(JSON.stringify(r.body)).not.toMatch(
-          /unique constraint|provider|identifier/i,
-        );
-      }
+      expect(res.body.code).toBe('AUTH-010');
+      expect(res.body.errors).toEqual({ reason: 'COMMON' });
+      expect(mailbox.sent).toHaveLength(0);
+      expect(await prisma.user.count()).toBe(0);
     });
+
+    it('refuses a password built from the email, and one shorter than 8 characters', async () => {
+      const own = await startRegistration(
+        app,
+        'new.person@example.com',
+        'xx-new.person-9Z',
+      ).expect(400);
+      expect(own.body.errors).toEqual({ reason: 'CONTAINS_EMAIL' });
+
+      await startRegistration(app, 'new@example.com', 'Ab1!').expect(400);
+      expect(mailbox.sent).toHaveLength(0);
+    });
+
+    it('a refused password does not use up the address cooldown: a better one goes straight through', async () => {
+      await startRegistration(app, 'new@example.com', 'qwertyuiop').expect(400);
+
+      await startRegistration(app, 'new@example.com').expect(202);
+      expect(mailbox.sent).toHaveLength(1);
+    });
+
+    it('login does not judge strength: a weak but well-formed password gets as far as the credential check (401, not 400)', async () => {
+      await request(app.getHttpServer())
+        .post(`${API}/auth/login`)
+        .send({ email: 'someone@example.com', password: 'password' })
+        .expect(401);
+    });
+
+    it.each([
+      [
+        'an email that is not one',
+        { email: 'not-an-email', password: 'long-enough-1' },
+      ],
+      ['an empty password', { email: 'a@example.com', password: '' }],
+      [
+        'a password under 8 characters',
+        { email: 'a@example.com', password: '1234567' },
+      ],
+      [
+        'a password that is not a string',
+        { email: 'a@example.com', password: 12345678 },
+      ],
+      [
+        'a password over 128 characters',
+        { email: 'a@example.com', password: 'x'.repeat(129) },
+      ],
+      [
+        'an email over 254 characters',
+        { email: `${'a'.repeat(250)}@example.com`, password: 'long-enough-1' },
+      ],
+      [
+        'a field it does not know',
+        { email: 'a@example.com', password: 'long-enough-1', admin: true },
+      ],
+    ])(
+      'login rejects %s with 400 before looking anyone up',
+      async (_name, body) => {
+        await request(app.getHttpServer())
+          .post(`${API}/auth/login`)
+          .send(body)
+          .expect(400);
+      },
+    );
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -234,7 +363,7 @@ describe('Auth (e2e)', () => {
       for (let i = 1; i <= 5; i++) {
         const res = await request(app.getHttpServer())
           .post(`${API}/auth/login`)
-          .send({ email: `nouser${i}@example.com`, password: 'pass' });
+          .send({ email: `nouser${i}@example.com`, password: 'long-enough-1' });
         // Responses 1-5 should NOT be 429
         expect(res.status).not.toBe(429);
       }
@@ -242,7 +371,7 @@ describe('Auth (e2e)', () => {
       // 6th attempt must be blocked
       const blocked = await request(app.getHttpServer())
         .post(`${API}/auth/login`)
-        .send({ email: 'nouser6@example.com', password: 'pass' })
+        .send({ email: 'nouser6@example.com', password: 'long-enough-1' })
         .expect(429);
 
       expect(blocked.body).toBeDefined();
@@ -809,6 +938,338 @@ describe('Auth (e2e)', () => {
         .get(`${API}/users/me`)
         .set('Authorization', `Bearer ${legacyToken}`)
         .expect(401);
+    });
+  });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Verification — confirming the email with a one-time code (spec: auth-verification)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const forgetCooldown = (email: string) =>
+    redisStore
+      .getClient()
+      .del(CACHE.AUTH.KEYS.OTP_COOLDOWN('REGISTER_EMAIL', sha256(email)));
+
+  const resendFor = (email: string) =>
+    request(app.getHttpServer())
+      .post(`${API}/auth/resend-verification`)
+      .send({ email });
+
+  describe('Verification AC-1: register emails a code and creates no account', () => {
+    it('sends one 6-digit code to the address and never returns it', async () => {
+      const res = await startRegistration(app, 'new@example.com').expect(202);
+
+      expect(mailbox.sent).toHaveLength(1);
+      expect(mailbox.sent[0].to).toBe('new@example.com');
+      const code = codeSentTo('new@example.com');
+      expect(code).toMatch(/^\d{6}$/);
+      expect(JSON.stringify(res.body)).not.toContain(code);
+      expect(await prisma.userCredential.count()).toBe(0);
+    });
+  });
+
+  describe('Verification AC-2: the right code creates the account and logs in', () => {
+    it('stores the registered password hash, starts a session and removes the pending registration', async () => {
+      await startRegistration(
+        app,
+        'new@example.com',
+        'Sunny-Giraffe-42!',
+      ).expect(202);
+
+      const res = await verifyEmail(
+        app,
+        'new@example.com',
+        codeSentTo('new@example.com'),
+      ).expect(200);
+
+      const credential = await prisma.userCredential.findFirstOrThrow();
+      expect(credential.identifier).toBe('new@example.com');
+      expect(credential.secret).toMatch(/^\$argon2id\$/);
+      expect(sidOf(res.body.data.accessToken)).toBe(
+        (await prisma.session.findFirstOrThrow()).id,
+      );
+      expect(
+        await redisStore
+          .getClient()
+          .exists(CACHE.AUTH.KEYS.PENDING_SIGNUP(sha256('new@example.com'))),
+      ).toBe(0);
+      await loginUser(app, 'new@example.com', 'Sunny-Giraffe-42!');
+    });
+
+    it('lets the new user call a protected route with the returned token', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const res = await verifyEmail(
+        app,
+        'new@example.com',
+        codeSentTo('new@example.com'),
+      ).expect(200);
+
+      await request(app.getHttpServer())
+        .get(`${API}/users/me`)
+        .set('Authorization', authHeader(res.body.data))
+        .expect(200);
+    });
+  });
+
+  describe('Verification AC-3: wrong codes lock the code after 5 tries', () => {
+    it('answers 400 with the same message each time; after the 5th, even the right code fails', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+      const wrong = wrongCodeFor(code);
+
+      const messages = new Set<string>();
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const res = await verifyEmail(app, 'new@example.com', wrong).expect(
+          400,
+        );
+        messages.add(res.body.message);
+      }
+      expect(messages.size).toBe(1);
+
+      await verifyEmail(app, 'new@example.com', code).expect(400);
+      expect(await prisma.user.count()).toBe(0);
+    });
+  });
+
+  describe('Verification AC-4: expired, used or unknown codes all look the same', () => {
+    it('rejects a wrong code, an expired code, a used code and an unknown address with one message', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+
+      const wrongCode = await verifyEmail(
+        app,
+        'new@example.com',
+        wrongCodeFor(code),
+      ).expect(400);
+      const unknown = await verifyEmail(
+        app,
+        'nobody@example.com',
+        '123456',
+      ).expect(400);
+
+      // expired: the code's key has timed out
+      await redisStore
+        .getClient()
+        .del(CACHE.AUTH.KEYS.OTP('REGISTER_EMAIL', sha256('new@example.com')));
+      const expired = await verifyEmail(app, 'new@example.com', code).expect(
+        400,
+      );
+
+      expect(
+        new Set([wrongCode, unknown, expired].map((r) => r.body.message)).size,
+      ).toBe(1);
+    });
+
+    it('rejects a code that was already used', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+      await verifyEmail(app, 'new@example.com', code).expect(200);
+
+      await verifyEmail(app, 'new@example.com', code).expect(400);
+    });
+
+    it('rejects input that is not a 6-digit code before looking anything up', async () => {
+      await verifyEmail(app, 'new@example.com', '12345').expect(400);
+      await verifyEmail(app, 'new@example.com', 'abcdef').expect(400);
+    });
+  });
+
+  describe('Verification AC-5: resend has a cooldown and replaces the old code', () => {
+    it('answers 429 while in cooldown; afterwards sends a new code and the old one stops working', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const first = codeSentTo('new@example.com');
+
+      // Still in cooldown: refused, and told how long is left
+      const refused = await resendFor('new@example.com').expect(429);
+      const wait = refused.body.errors.retryAfterSeconds;
+      expect(wait).toBeGreaterThan(0);
+      expect(wait).toBeLessThanOrEqual(CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN);
+      expect(Number(refused.headers['retry-after'])).toBe(wait);
+
+      await forgetCooldown('new@example.com');
+      await resendFor('new@example.com').expect(202);
+      const second = codeSentTo('new@example.com');
+      expect(mailbox.sent).toHaveLength(2);
+
+      if (first !== second) {
+        await verifyEmail(app, 'new@example.com', first).expect(400);
+      }
+      await verifyEmail(app, 'new@example.com', second).expect(200);
+    });
+  });
+
+  describe('Verification AC-6: at most 5 codes per address per hour', () => {
+    it('answers 429 once the allowance is used, however the cooldown stands', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      for (let resend = 1; resend <= 4; resend++) {
+        await forgetCooldown('new@example.com');
+        await resendFor('new@example.com').expect(202);
+      }
+      expect(mailbox.sent).toHaveLength(5);
+
+      await forgetCooldown('new@example.com');
+      const refused = await resendFor('new@example.com').expect(429);
+      expect(mailbox.sent).toHaveLength(5);
+      // The hourly allowance resets within the hour, so the wait is longer than a cooldown
+      expect(refused.body.errors.retryAfterSeconds).toBeGreaterThan(0);
+      expect(refused.body.errors.retryAfterSeconds).toBeLessThanOrEqual(
+        CACHE.AUTH.SETTINGS.OTP_SENDS_WINDOW,
+      );
+    });
+  });
+
+  describe('Verification AC-7: resend when nothing is waiting', () => {
+    it('answers 404 and sends nothing for an address that has an account or never registered, with the same body for both', async () => {
+      await registerUser(app, 'existing@example.com');
+      mailbox.sent.length = 0;
+
+      const existing = await resendFor('existing@example.com').expect(404);
+      const unknown = await resendFor('unknown@example.com').expect(404);
+
+      expect(existing.body.code).toBe('AUTH-009');
+      // Nothing in the answer tells an account from an address nobody registered
+      expect({ ...existing.body, traceId: null, timestamp: null }).toEqual({
+        ...unknown.body,
+        traceId: null,
+        timestamp: null,
+      });
+      expect(mailbox.sent).toHaveLength(0);
+    });
+
+    it('answers 404 once the waiting registration has timed out, so the user knows to register again', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      await redisStore
+        .getClient()
+        .del(CACHE.AUTH.KEYS.PENDING_SIGNUP(sha256('new@example.com')));
+      await forgetCooldown('new@example.com');
+      mailbox.sent.length = 0;
+
+      const res = await resendFor('new@example.com').expect(404);
+
+      expect(res.body.code).toBe('AUTH-009');
+      expect(mailbox.sent).toHaveLength(0);
+    });
+
+    it('does not use up the address allowance when there was nothing to send', async () => {
+      await resendFor('nobody@example.com').expect(404);
+      await resendFor('nobody@example.com').expect(404); // no 429: nothing was reserved
+
+      await startRegistration(app, 'nobody@example.com').expect(202);
+    });
+  });
+
+  describe('Verification AC-8: an address that already has an account', () => {
+    it('is refused with 409 and no code is sent', async () => {
+      await registerUser(app, 'existing@example.com');
+      mailbox.sent.length = 0;
+
+      await startRegistration(app, 'existing@example.com').expect(409);
+
+      expect(mailbox.sent).toHaveLength(0);
+    });
+  });
+
+  describe('Verification AC-9: registering again while one is waiting', () => {
+    it('replaces the waiting registration (after the cooldown): the new password wins and the old code dies', async () => {
+      await startRegistration(app, 'new@example.com', 'FirstPassword1!').expect(
+        202,
+      );
+      const firstCode = codeSentTo('new@example.com');
+      await forgetCooldown('new@example.com');
+
+      await startRegistration(
+        app,
+        'new@example.com',
+        'SecondPassword2!',
+      ).expect(202);
+      const secondCode = codeSentTo('new@example.com');
+
+      if (firstCode !== secondCode) {
+        await verifyEmail(app, 'new@example.com', firstCode).expect(400);
+      }
+      await verifyEmail(app, 'new@example.com', secondCode).expect(200);
+      await loginUser(app, 'new@example.com', 'SecondPassword2!');
+      await request(app.getHttpServer())
+        .post(`${API}/auth/login`)
+        .send({ email: 'new@example.com', password: 'FirstPassword1!' })
+        .expect(401);
+    });
+
+    it('answers 429 in the cooldown and leaves the waiting registration, and its password, untouched', async () => {
+      await startRegistration(app, 'new@example.com', 'FirstPassword1!').expect(
+        202,
+      );
+      const code = codeSentTo('new@example.com');
+
+      await startRegistration(
+        app,
+        'new@example.com',
+        'SecondPassword2!',
+      ).expect(429);
+
+      await verifyEmail(app, 'new@example.com', code).expect(200);
+      await loginUser(app, 'new@example.com', 'FirstPassword1!');
+    });
+  });
+
+  describe('Verification AC-10: the email provider fails', () => {
+    it('still answers 202 and keeps the registration, so a later resend completes it', async () => {
+      mailbox.failing = true;
+      await startRegistration(app, 'new@example.com').expect(202);
+      expect(mailbox.sent).toHaveLength(0);
+
+      mailbox.failing = false;
+      await forgetCooldown('new@example.com');
+      await resendFor('new@example.com').expect(202);
+      await verifyEmail(
+        app,
+        'new@example.com',
+        codeSentTo('new@example.com'),
+      ).expect(200);
+    });
+  });
+
+  describe('Verification AC-11: the code is never stored in the clear', () => {
+    it('appears nowhere in Redis, only a keyed hash does', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+
+      const client = redisStore.getClient();
+      const keys: string[] = await client.keys('*');
+      const dump: string[] = [];
+      for (const key of keys) {
+        const type = await client.type(key);
+        const value =
+          type === 'hash' ? await client.hgetall(key) : await client.get(key);
+        dump.push(key, JSON.stringify(value));
+      }
+
+      expect(dump.join('\n')).not.toContain(code);
+      const otpKey = CACHE.AUTH.KEYS.OTP(
+        'REGISTER_EMAIL',
+        sha256('new@example.com'),
+      );
+      expect(await client.hget(otpKey, 'hash')).toMatch(/^[0-9a-f]{64}$/);
+    });
+  });
+
+  describe('Verification AC-12: two verifications at once', () => {
+    it('create exactly one account: one request succeeds, the other is refused', async () => {
+      await startRegistration(app, 'new@example.com').expect(202);
+      const code = codeSentTo('new@example.com');
+
+      const results = await Promise.all([
+        verifyEmail(app, 'new@example.com', code),
+        verifyEmail(app, 'new@example.com', code),
+      ]);
+
+      expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+      expect(await prisma.userCredential.count()).toBe(1);
+      expect(await prisma.user.count()).toBe(1);
+      for (const r of results) {
+        expect(JSON.stringify(r.body)).not.toMatch(
+          /unique constraint|provider|identifier/i,
+        );
+      }
     });
   });
 });

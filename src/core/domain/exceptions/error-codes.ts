@@ -174,4 +174,22 @@ export const AuthErrorCodes = {
     message: 'Session not found',
     status: HttpStatus.NOT_FOUND,
   },
+  // One answer for a wrong, expired, used-up or never-issued code, so the reply says nothing about which
+  INVALID_VERIFICATION_CODE: {
+    code: 'AUTH-008',
+    message: 'Invalid or expired verification code',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  // Asking for a new code when nothing is waiting (never registered, already has an account, or it timed out)
+  NO_PENDING_REGISTRATION: {
+    code: 'AUTH-009',
+    message: 'No registration is waiting for this email; register again',
+    status: HttpStatus.NOT_FOUND,
+  },
+  // Only when choosing a password (register); login never applies it. `errors.reason` says which rule
+  WEAK_PASSWORD: {
+    code: 'AUTH-010',
+    message: 'Password is too easy to guess',
+    status: HttpStatus.BAD_REQUEST,
+  },
 };

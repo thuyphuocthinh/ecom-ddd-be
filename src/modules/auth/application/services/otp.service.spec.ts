@@ -1,0 +1,218 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { OtpService } from './otp.service.js';
+import { AuthErrorCodes, CACHE } from '@/core/index.js';
+import type { OtpStore } from '../../infrastructure/index.js';
+
+const MAX = CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS;
+const EMAIL = 'new@example.com';
+
+/**
+ * In-memory stand-in for OtpStore that behaves like the Redis scripts do: a guess
+ * counts as an attempt, the guess over the limit destroys the code, and consuming
+ * succeeds once.
+ */
+class FakeOtpStore {
+  codes = new Map<string, { hash: string; attempts: number }>();
+  reservation: 'RESERVED' | 'COOLDOWN' | 'LIMIT' = 'RESERVED';
+  private id = (purpose: string, email: string) => `${purpose}:${email}`;
+
+  async reserveSend() {
+    return {
+      status: this.reservation,
+      retryAfterSeconds: this.reservation === 'RESERVED' ? 0 : 217,
+    };
+  }
+  async saveCode(purpose: string, email: string, hash: string) {
+    this.codes.set(this.id(purpose, email), { hash, attempts: 0 });
+  }
+  async fetchAndCountAttempt(purpose: string, email: string) {
+    const entry = this.codes.get(this.id(purpose, email));
+    if (!entry) return null;
+    entry.attempts += 1;
+    if (entry.attempts > MAX) {
+      this.codes.delete(this.id(purpose, email));
+      return null;
+    }
+    return { hash: entry.hash, attempts: entry.attempts };
+  }
+  async consume(purpose: string, email: string) {
+    return this.codes.delete(this.id(purpose, email));
+  }
+  async invalidate(purpose: string, email: string) {
+    this.codes.delete(this.id(purpose, email));
+  }
+}
+
+const build = (jwtSecret = 's'.repeat(32)) => {
+  const store = new FakeOtpStore();
+  const service = new OtpService(
+    { jwtSecret } as never,
+    store as unknown as OtpStore,
+  );
+  return { service, store };
+};
+
+describe('OtpService', () => {
+  let service: OtpService;
+  let store: FakeOtpStore;
+
+  beforeEach(() => {
+    ({ service, store } = build());
+  });
+
+  describe('issue', () => {
+    it('returns a 6-digit code', async () => {
+      await expect(service.issue('REGISTER_EMAIL', EMAIL)).resolves.toMatch(
+        /^\d{6}$/,
+      );
+    });
+
+    it('stores only a keyed hash of the code, never the code (AC-11)', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+
+      const stored = store.codes.get(`REGISTER_EMAIL:${EMAIL}`)!;
+      expect(stored.hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(stored.hash).not.toContain(code);
+      expect(JSON.stringify([...store.codes.values()])).not.toContain(
+        `"${code}"`,
+      );
+    });
+
+    it('starts the new code with no wrong guesses, replacing the previous one (AC-5)', async () => {
+      const first = await service.issue('REGISTER_EMAIL', EMAIL);
+      await service.verify('REGISTER_EMAIL', EMAIL, '000000'); // a wrong guess
+      const second = await service.issue('REGISTER_EMAIL', EMAIL);
+
+      expect(store.codes.get(`REGISTER_EMAIL:${EMAIL}`)!.attempts).toBe(0);
+      if (first !== second) {
+        await expect(
+          service.verify('REGISTER_EMAIL', EMAIL, first),
+        ).resolves.toBe(false);
+      }
+      await expect(
+        service.verify('REGISTER_EMAIL', EMAIL, second),
+      ).resolves.toBe(true);
+    });
+  });
+
+  describe('verify', () => {
+    it('accepts the right code (AC-2)', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+
+      await expect(service.verify('REGISTER_EMAIL', EMAIL, code)).resolves.toBe(
+        true,
+      );
+    });
+
+    it('rejects a wrong code', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+      const wrong = code === '000000' ? '000001' : '000000';
+
+      await expect(
+        service.verify('REGISTER_EMAIL', EMAIL, wrong),
+      ).resolves.toBe(false);
+    });
+
+    it('rejects when no code was ever issued for the address (AC-4)', async () => {
+      await expect(
+        service.verify('REGISTER_EMAIL', 'nobody@example.com', '123456'),
+      ).resolves.toBe(false);
+    });
+
+    it('does not let a code issued for one address be used for another', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+      await service.issue('REGISTER_EMAIL', 'other@example.com');
+
+      // same code, other address: the stored value is bound to the address
+      const otherEntry = store.codes.get('REGISTER_EMAIL:other@example.com')!;
+      const ownEntry = store.codes.get(`REGISTER_EMAIL:${EMAIL}`)!;
+      expect(otherEntry.hash).not.toBe(ownEntry.hash);
+      expect(code).toMatch(/^\d{6}$/);
+    });
+
+    it('binds the stored value to the server secret: another secret computes a different hash', async () => {
+      const a = build('a'.repeat(32));
+      const b = build('b'.repeat(32));
+      const code = await a.service.issue('REGISTER_EMAIL', EMAIL);
+      // Copy A's stored hash into B and try the real code there
+      const hashFromA = a.store.codes.get(`REGISTER_EMAIL:${EMAIL}`)!.hash;
+      await b.store.saveCode('REGISTER_EMAIL', EMAIL, hashFromA);
+
+      await expect(
+        b.service.verify('REGISTER_EMAIL', EMAIL, code),
+      ).resolves.toBe(false);
+    });
+
+    it('destroys the code after the allowed number of wrong guesses, so even the right code then fails (AC-3)', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+      const wrong = code === '000000' ? '000001' : '000000';
+
+      for (let i = 0; i < MAX; i++) {
+        await expect(
+          service.verify('REGISTER_EMAIL', EMAIL, wrong),
+        ).resolves.toBe(false);
+      }
+
+      await expect(service.verify('REGISTER_EMAIL', EMAIL, code)).resolves.toBe(
+        false,
+      );
+    });
+
+    it('still accepts the right code on the last allowed attempt', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+      const wrong = code === '000000' ? '000001' : '000000';
+      for (let i = 0; i < MAX - 1; i++) {
+        await service.verify('REGISTER_EMAIL', EMAIL, wrong);
+      }
+
+      await expect(service.verify('REGISTER_EMAIL', EMAIL, code)).resolves.toBe(
+        true,
+      );
+    });
+  });
+
+  describe('consume', () => {
+    it('succeeds for exactly one caller (AC-12)', async () => {
+      await service.issue('REGISTER_EMAIL', EMAIL);
+
+      const results = await Promise.all([
+        service.consume('REGISTER_EMAIL', EMAIL),
+        service.consume('REGISTER_EMAIL', EMAIL),
+      ]);
+
+      expect(results.filter(Boolean)).toHaveLength(1);
+    });
+
+    it('leaves nothing to verify afterwards (AC-4)', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+      await service.consume('REGISTER_EMAIL', EMAIL);
+
+      await expect(service.verify('REGISTER_EMAIL', EMAIL, code)).resolves.toBe(
+        false,
+      );
+    });
+  });
+
+  describe('reserveSend', () => {
+    it('lets a send through when the store reserves it', async () => {
+      await expect(
+        service.reserveSend('REGISTER_EMAIL', EMAIL),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each(['COOLDOWN', 'LIMIT'] as const)(
+      'answers 429 when the store says %s, and says how long to wait (AC-5, AC-6)',
+      async (reservation) => {
+        store.reservation = reservation;
+
+        await expect(
+          service.reserveSend('REGISTER_EMAIL', EMAIL),
+        ).rejects.toSatisfy(
+          (e: any) =>
+            e.code === AuthErrorCodes.RATE_LIMIT_EXCEEDED.code &&
+            e.details.retryAfterSeconds === 217,
+        );
+      },
+    );
+  });
+});

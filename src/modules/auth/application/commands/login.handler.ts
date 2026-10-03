@@ -1,17 +1,11 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject, Logger } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { LoginCommand } from './login.command.js';
 import type { IUserRepository as IUserRepositoryType } from '../../../users/domain/index.js';
-import {
-  AuthDomainException,
-  Session,
-  type ISessionRepository,
-} from '../../domain/index.js';
+import { AuthDomainException } from '../../domain/index.js';
 import { AuthErrorCodes } from '@/core/domain/exceptions/error-codes.js';
 import { HashUtil } from '@/core/utils/hash.util.js';
-import { TokenStore } from '../../infrastructure/index.js';
-import { TokenIssuer } from '../services/token-issuer.service.js';
+import { SessionIssuer } from '../services/session-issuer.service.js';
 import { CredentialProvider } from '@prisma/client';
 
 @CommandHandler(LoginCommand)
@@ -27,10 +21,7 @@ export class LoginHandler implements ICommandHandler<LoginCommand> {
   constructor(
     @Inject('IUserRepository')
     private readonly userRepo: IUserRepositoryType,
-    @Inject('ISessionRepository')
-    private readonly sessionRepo: ISessionRepository,
-    private readonly tokenStore: TokenStore,
-    private readonly tokenIssuer: TokenIssuer,
+    private readonly sessionIssuer: SessionIssuer,
   ) {}
 
   async execute(
@@ -57,30 +48,8 @@ export class LoginHandler implements ICommandHandler<LoginCommand> {
       this.throwInvalidCredentials();
     }
 
-    // 3. Start a session and issue tokens bound to it and to the user's current token version
-    const sessionId = randomUUID();
-    const tokenVersion = await this.tokenStore.getTokenVersion(user.id);
-    const { accessToken, refreshToken } = this.tokenIssuer.issue(
-      user,
-      tokenVersion,
-      sessionId,
-    );
-
-    // 4. Persist the session; only the refresh token's hash is stored
-    await this.sessionRepo.save(
-      Session.start({
-        id: sessionId,
-        userId: user.id,
-        refreshTokenHash: HashUtil.sha256(refreshToken),
-        userAgent: command.client.userAgent,
-        ipAddress: command.client.ip,
-        now: new Date(),
-        refreshTtlSeconds: this.tokenIssuer.refreshTtlSeconds,
-        absoluteTtlSeconds: this.tokenIssuer.sessionAbsoluteTtlSeconds,
-      }),
-    );
-
-    return { accessToken, refreshToken };
+    // 3. Start a session and hand out its tokens
+    return this.sessionIssuer.start(user, command.client);
   }
 
   /**

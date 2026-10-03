@@ -37,6 +37,15 @@ export * from './infrastructure/rate-limit/rate-limit.service.js';
 export * from './infrastructure/rate-limit/rate-limit.module.js';
 export * from './infrastructure/token/token.store.js';
 export * from './infrastructure/token/token.module.js';
+export * from './infrastructure/email/email-sender.port.js';
+export * from './infrastructure/email/email-layout.js';
+export * from './infrastructure/email/email-sender.factory.js';
+export * from './infrastructure/email/log-email-sender.js';
+export * from './infrastructure/email/smtp-email-sender.js';
+export * from './infrastructure/email/email.module.js';
+
+// Config — settings read from the environment
+export * from './config/app.config.js';
 
 // Utils — stateless pure functions
 export * from './utils/snowflake.util.js';

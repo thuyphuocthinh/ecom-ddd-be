@@ -4,4 +4,6 @@ export * from './refresh.dto.js';
 export * from './logout.dto.js';
 export * from './auth-response.dto.js';
 export * from './register-response.dto.js';
+export * from './verify-email.dto.js';
+export * from './resend-verification.dto.js';
 export * from './session-response.dto.js';

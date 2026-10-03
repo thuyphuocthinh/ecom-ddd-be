@@ -16,6 +16,9 @@ import {
 
 import {
   RegisterDto,
+  VerifyEmailDto,
+  ResendVerificationDto,
+  ResendVerificationResponseDto,
   LoginDto,
   RefreshTokenDto,
   LogoutDto,
@@ -24,6 +27,8 @@ import {
 } from '../dtos/index.js';
 import {
   RegisterCommand,
+  VerifyEmailCommand,
+  ResendVerificationCommand,
   LoginCommand,
   RefreshTokenCommand,
   LogoutCommand,
@@ -45,13 +50,68 @@ export class AuthController {
 
   @Post('register')
   @RateLimit({ limit: 3, window: buildTTL('HOUR', 1) })
-  @ApiOperation({ summary: 'Register a new user' })
-  @ApiResponse({ status: HttpStatus.CREATED, type: RegisterResponseDto })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Start registration: emails a 6-digit code to confirm the address',
+    description:
+      'No account exists yet. Enter the code at POST /auth/verify-email to create it and log in.',
+  })
+  @ApiResponse({ status: HttpStatus.ACCEPTED, type: RegisterResponseDto })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description: 'Email already has an account',
+  })
   async register(@Body() dto: RegisterDto): Promise<RegisterResponseDto> {
-    const user = await this.commandBus.execute<RegisterCommand, { id: string }>(
+    return this.commandBus.execute(
       new RegisterCommand(dto.email, dto.password, dto.displayName),
     );
-    return { userId: user.id };
+  }
+
+  @Post('verify-email')
+  @RateLimit({ limit: 10, window: buildTTL('MINUTE', 15) })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirm the emailed code: creates the account and logs in',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: AuthResponseDto })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Wrong, expired or already used code',
+  })
+  async verifyEmail(
+    @Body() dto: VerifyEmailDto,
+    @ClientInfo() client: IClientInfo,
+  ): Promise<AuthResponseDto> {
+    return this.commandBus.execute(
+      new VerifyEmailCommand(dto.email, dto.code, client),
+    );
+  }
+
+  @Post('resend-verification')
+  @RateLimit({ limit: 5, window: buildTTL('MINUTE', 15) })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Send the code again',
+    description:
+      'Only for a registration that is still waiting. When nothing is waiting (never registered, already has an account, or it timed out) it answers 404, and the user should register again.',
+  })
+  @ApiResponse({
+    status: HttpStatus.ACCEPTED,
+    type: ResendVerificationResponseDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'No registration is waiting for this email; register again',
+  })
+  @ApiResponse({
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    description:
+      'Asked again too soon, or too many codes this hour. `errors.retryAfterSeconds` (and the Retry-After header) say how long to wait',
+  })
+  async resendVerification(
+    @Body() dto: ResendVerificationDto,
+  ): Promise<ResendVerificationResponseDto> {
+    return this.commandBus.execute(new ResendVerificationCommand(dto.email));
   }
 
   @Post('login')

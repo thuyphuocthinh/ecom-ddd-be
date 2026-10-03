@@ -4,7 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 
 import { UsersModule } from '../users/users.module.js';
-import { JwtAuthGuard, RolesGuard } from '@/core/index.js';
+import { JwtAuthGuard, RolesGuard, appConfig } from '@/core/index.js';
 import { authConfig } from './auth.config.js';
 import type { AuthConfig } from './auth.config.js';
 import {
@@ -13,12 +13,21 @@ import {
   RefreshTokenHandler,
   LogoutHandler,
   LogoutAllHandler,
+  VerifyEmailHandler,
+  ResendVerificationHandler,
   RevokeSessionHandler,
   RevokeOtherSessionsHandler,
   ListSessionsHandler,
   TokenIssuer,
+  SessionIssuer,
+  OtpService,
+  VerificationMailer,
 } from './application/index.js';
-import { PrismaSessionRepository } from './infrastructure/index.js';
+import {
+  PrismaSessionRepository,
+  OtpStore,
+  PendingSignupStore,
+} from './infrastructure/index.js';
 import { AuthController } from './presentation/index.js';
 import { SessionController } from './presentation/controllers/session.controller.js';
 
@@ -28,6 +37,8 @@ const CommandHandlers = [
   RefreshTokenHandler,
   LogoutHandler,
   LogoutAllHandler,
+  VerifyEmailHandler,
+  ResendVerificationHandler,
   RevokeSessionHandler,
   RevokeOtherSessionsHandler,
 ];
@@ -40,6 +51,7 @@ const QueryHandlers = [ListSessionsHandler];
     CqrsModule,
     UsersModule,
     ConfigModule.forFeature(authConfig),
+    ConfigModule.forFeature(appConfig),
     JwtModule.registerAsync({
       imports: [ConfigModule.forFeature(authConfig)],
       inject: [authConfig.KEY],
@@ -52,6 +64,11 @@ const QueryHandlers = [ListSessionsHandler];
   controllers: [AuthController, SessionController],
   providers: [
     TokenIssuer,
+    SessionIssuer,
+    OtpService,
+    OtpStore,
+    PendingSignupStore,
+    VerificationMailer,
     { provide: 'ISessionRepository', useClass: PrismaSessionRepository },
     ...CommandHandlers,
     ...QueryHandlers,

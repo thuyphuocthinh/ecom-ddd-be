@@ -46,6 +46,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
       code = exception.code;
       errors = exception.details || null;
+      // A refusal that says when to come back also says so in the standard header
+      const retryAfter = (exception.details as { retryAfterSeconds?: unknown })
+        ?.retryAfterSeconds;
+      if (typeof retryAfter === 'number' && retryAfter > 0) {
+        response.setHeader('Retry-After', String(Math.ceil(retryAfter)));
+      }
     }
     // Anything else is an unexpected failure (Prisma, Redis, a bug...). Its message
     // can carry SQL, table/column names or connection details, so the client only

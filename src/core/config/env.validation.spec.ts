@@ -30,6 +30,113 @@ describe('validateEnv', () => {
     );
   });
 
+  describe('EMAIL_PROVIDER', () => {
+    it('defaults to the log adapter outside production', () => {
+      expect(() => validateEnv({ ...VALID })).not.toThrow();
+      expect(() =>
+        validateEnv({ ...VALID, NODE_ENV: 'development' }),
+      ).not.toThrow();
+    });
+
+    it('rejects an unknown provider', () => {
+      expect(() =>
+        validateEnv({ ...VALID, EMAIL_PROVIDER: 'carrier-pigeon' }),
+      ).toThrow(/EMAIL_PROVIDER/);
+    });
+
+    it('refuses the log adapter in production, whether chosen or defaulted (it prints one-time codes)', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          NODE_ENV: 'production',
+          EMAIL_PROVIDER: 'log',
+        }),
+      ).toThrow(/EMAIL_PROVIDER=log/);
+      expect(() => validateEnv({ ...VALID, NODE_ENV: 'production' })).toThrow(
+        /EMAIL_PROVIDER=log/,
+      );
+    });
+  });
+
+  describe('EMAIL_PROVIDER=smtp', () => {
+    const SMTP = {
+      ...VALID,
+      EMAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'smtp.example.com',
+      EMAIL_FROM: 'Ecom <no-reply@example.com>',
+    };
+
+    it('accepts the minimal settings: a host and a sender address', () => {
+      expect(() => validateEnv(SMTP)).not.toThrow();
+    });
+
+    it('accepts a full config with port, TLS flag and login', () => {
+      expect(() =>
+        validateEnv({
+          ...SMTP,
+          SMTP_PORT: '465',
+          SMTP_SECURE: 'true',
+          SMTP_USER: 'apikey',
+          SMTP_PASS: 'secret',
+        }),
+      ).not.toThrow();
+    });
+
+    it('is allowed in production, unlike the log adapter', () => {
+      expect(() =>
+        validateEnv({ ...SMTP, NODE_ENV: 'production' }),
+      ).not.toThrow();
+    });
+
+    it('needs a host', () => {
+      expect(() => validateEnv({ ...SMTP, SMTP_HOST: undefined })).toThrow(
+        /SMTP_HOST/,
+      );
+      expect(() => validateEnv({ ...SMTP, SMTP_HOST: '  ' })).toThrow(
+        /SMTP_HOST/,
+      );
+    });
+
+    it('needs a sender address', () => {
+      expect(() => validateEnv({ ...SMTP, EMAIL_FROM: undefined })).toThrow(
+        /EMAIL_FROM/,
+      );
+      expect(() =>
+        validateEnv({ ...SMTP, EMAIL_FROM: 'not-an-address' }),
+      ).toThrow(/EMAIL_FROM/);
+    });
+
+    it('rejects a port that is not a valid port number', () => {
+      expect(() => validateEnv({ ...SMTP, SMTP_PORT: 'abc' })).toThrow(
+        /SMTP_PORT/,
+      );
+      expect(() => validateEnv({ ...SMTP, SMTP_PORT: '70000' })).toThrow(
+        /SMTP_PORT/,
+      );
+    });
+
+    it('rejects an SMTP_SECURE that is not true or false', () => {
+      expect(() => validateEnv({ ...SMTP, SMTP_SECURE: 'yes' })).toThrow(
+        /SMTP_SECURE/,
+      );
+    });
+
+    it('wants the login as a pair: a user without a password cannot work', () => {
+      expect(() => validateEnv({ ...SMTP, SMTP_USER: 'apikey' })).toThrow(
+        /SMTP_USER and SMTP_PASS/,
+      );
+      expect(() => validateEnv({ ...SMTP, SMTP_PASS: 'secret' })).toThrow(
+        /SMTP_USER and SMTP_PASS/,
+      );
+    });
+
+    it('is not checked when another provider is chosen', () => {
+      expect(() =>
+        validateEnv({ ...VALID, EMAIL_PROVIDER: 'log' }),
+      ).not.toThrow();
+    });
+  });
+
   describe('JWT settings', () => {
     it('throws when JWT_ACCESS_SECRET is missing', () => {
       expect(() => validateEnv({ DATABASE_URL: VALID.DATABASE_URL })).toThrow(

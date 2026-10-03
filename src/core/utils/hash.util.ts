@@ -1,5 +1,5 @@
 import * as argon2 from 'argon2';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes, randomInt } from 'crypto';
 
 export class HashUtil {
   /** Deterministic hex digest for high-entropy values (tokens), where a slow password hash isn't needed. */
@@ -32,9 +32,16 @@ export class HashUtil {
     return randomBytes(length).toString('hex');
   }
 
+  /** Keyed hex digest: unlike a plain hash, it can't be brute-forced offline without the key. */
+  static hmacSha256(key: string | Buffer, value: string): string {
+    return createHmac('sha256', key).update(value).digest('hex');
+  }
+
+  /**
+   * A numeric one-time code of `length` digits (leading zeros allowed), drawn from
+   * the OS CSPRNG so it can't be predicted from earlier codes.
+   */
   static generateOTP(length = 6): string {
-    const min = Math.pow(10, length - 1);
-    const max = Math.pow(10, length) - 1;
-    return Math.floor(min + Math.random() * (max - min + 1)).toString();
+    return randomInt(0, Math.pow(10, length)).toString().padStart(length, '0');
   }
 }

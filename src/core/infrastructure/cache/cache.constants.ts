@@ -46,6 +46,14 @@ export const CACHE = {
     _VER: 'v1',
     SETTINGS: {
       ROTATION_GRACE_TTL: buildTTL('SECOND', 15), // grace window cho concurrent refresh
+      // One-time codes sent by email (see auth-verification spec)
+      OTP_LENGTH: 6,
+      OTP_TTL: buildTTL('MINUTE', 10),
+      OTP_MAX_ATTEMPTS: 5, // wrong guesses before the code is destroyed
+      OTP_RESEND_COOLDOWN: buildTTL('MINUTE', 5),
+      OTP_MAX_SENDS_PER_HOUR: 5, // per email address
+      OTP_SENDS_WINDOW: buildTTL('HOUR', 1),
+      PENDING_SIGNUP_TTL: buildTTL('MINUTE', 30), // how long a not-yet-verified registration is kept
     },
     KEYS: {
       // Flag set when a session is revoked so its still-valid access tokens are refused at once
@@ -53,6 +61,15 @@ export const CACHE = {
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:session_revoked:${sessionId}`,
       TOKEN_VERSION: (userId: string) =>
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:version:${userId}`,
+      // `subjectHash` is the sha256 of the (normalised) email, so the address itself never sits in a key
+      PENDING_SIGNUP: (subjectHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:pending_signup:${subjectHash}`,
+      OTP: (purpose: string, subjectHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:otp:${purpose}:${subjectHash}`,
+      OTP_COOLDOWN: (purpose: string, subjectHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:otp_cooldown:${purpose}:${subjectHash}`,
+      OTP_SENT: (purpose: string, subjectHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:otp_sent:${purpose}:${subjectHash}`,
       ROTATION_GRACE: (tokenHash: string) =>
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:rotation_grace:${tokenHash}`,
     },
