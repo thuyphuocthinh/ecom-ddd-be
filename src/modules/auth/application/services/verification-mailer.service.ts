@@ -5,7 +5,7 @@ import {
   type AppConfig,
   type IEmailDispatcher,
 } from '@/core/index.js';
-import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
+import { CACHE } from '@/core/infrastructure/redis/cache.constants.js';
 import { buildVerificationEmail } from './verification-email.js';
 
 /**

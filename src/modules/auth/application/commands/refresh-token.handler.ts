@@ -7,7 +7,7 @@ import {
   type ISessionRepository,
 } from '../../domain/index.js';
 import { AuthErrorCodes } from '@/core/domain/exceptions/error-codes.js';
-import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
+import { CACHE } from '@/core/infrastructure/redis/cache.constants.js';
 import { HashUtil } from '@/core/utils/hash.util.js';
 import { TokenStore } from '../../infrastructure/index.js';
 import { TokenIssuer } from '../services/token-issuer.service.js';

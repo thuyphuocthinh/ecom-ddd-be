@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { RedisService } from '../redis/redis.service.js';
+import { RedisService } from '../redis.service.js';
 
 // INCR + EXPIRE in one atomic step: a crash between two separate commands
 // would leave a counter with no TTL, locking the caller out forever.

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { RedisService } from '@/core/infrastructure/redis/redis.service.js';
-import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
+import { CACHE } from '@/core/infrastructure/redis/cache.constants.js';
 import { HashUtil } from '@/core/utils/hash.util.js';
 import type { OtpPurpose } from '../../domain/index.js';
 import { orServiceUnavailable } from './redis-failure.js';

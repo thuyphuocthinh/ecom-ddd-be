@@ -1,7 +1,7 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { ResendVerificationCommand } from './resend-verification.command.js';
 import { AuthErrorCodes } from '@/core/domain/exceptions/error-codes.js';
-import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
+import { CACHE } from '@/core/infrastructure/redis/cache.constants.js';
 import { AuthDomainException } from '../../domain/index.js';
 import { OtpService } from '../services/otp.service.js';
 import { VerificationMailer } from '../services/verification-mailer.service.js';

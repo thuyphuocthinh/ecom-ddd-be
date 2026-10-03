@@ -3,7 +3,7 @@ import {
   defineJob,
   JOB_QUEUE,
   type IJobQueue,
-} from '../jobs/job-queue.port.js';
+} from '../messaging/jobs/job-queue.port.js';
 import {
   EMAIL_SENDER,
   type EmailMessage,

@@ -10,7 +10,7 @@ import {
 import { appConfig, type AppConfig } from '@/core/index.js';
 import { AuthDomainException } from '../../domain/index.js';
 import { findPasswordWeakness } from '../../domain/policies/password.policy.js';
-import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
+import { CACHE } from '@/core/infrastructure/redis/cache.constants.js';
 import { HashUtil } from '@/core/utils/hash.util.js';
 import { CredentialProvider } from '@prisma/client';
 import { OtpService } from '../services/otp.service.js';

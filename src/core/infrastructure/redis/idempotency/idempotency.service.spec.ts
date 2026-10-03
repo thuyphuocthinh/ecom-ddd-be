@@ -4,7 +4,7 @@ import {
   IdempotencyService,
   computeIdempotencyFingerprint,
 } from './idempotency.service.js';
-import type { RedisService } from '../redis/redis.service.js';
+import type { RedisService } from '../redis.service.js';
 
 describe('IdempotencyService', () => {
   let redisClient: {

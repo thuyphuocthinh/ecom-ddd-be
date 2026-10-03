@@ -3,10 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative, sep } from 'path';
 
 const SRC = join(process.cwd(), 'src');
-const ALLOWED = [
-  join('core', 'infrastructure', 'rabbitmq'),
-  join('core', 'infrastructure', 'jobs'),
-];
+const ALLOWED = [join('core', 'infrastructure', 'messaging')];
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -17,7 +14,7 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe('job queue boundary (AC-11)', () => {
-  it('keeps amqplib and RabbitMQService inside the two infrastructure folders, so business code only knows the IJobQueue port', () => {
+  it('keeps amqplib and RabbitMQService inside core/infrastructure/messaging, so business code only knows the IJobQueue port', () => {
     const offenders = sourceFiles(SRC)
       .filter((file) => {
         const path = relative(SRC, file);

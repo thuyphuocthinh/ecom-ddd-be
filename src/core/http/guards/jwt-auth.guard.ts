@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
-import { TokenStore } from '../../infrastructure/token/token.store.js';
+import { TokenStore } from '../../infrastructure/redis/token/token.store.js';
 import { DomainException, AuthErrorCodes } from '../../index.js';
 import { AuthenticatedRequest } from '../interfaces/authenticated-request.interface.js';
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHash } from 'crypto';
 import { TokenStore } from './token.store.js';
-import type { RedisService } from '../redis/redis.service.js';
-import { CACHE } from '../cache/cache.constants.js';
+import type { RedisService } from '../redis.service.js';
+import { CACHE } from '../cache.constants.js';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 

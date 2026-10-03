@@ -1,6 +1,6 @@
 import { Injectable, ConflictException, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { RedisService } from '../redis/redis.service.js';
+import { RedisService } from '../redis.service.js';
 
 interface IdempotencyRecord<T> {
   status: 'processing' | 'completed';

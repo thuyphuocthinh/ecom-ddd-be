@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { timingSafeEqual } from 'crypto';
 import { AuthErrorCodes } from '@/core/domain/exceptions/error-codes.js';
-import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
+import { CACHE } from '@/core/infrastructure/redis/cache.constants.js';
 import { HashUtil } from '@/core/utils/hash.util.js';
 import { authConfig } from '../../auth.config.js';
 import type { AuthConfig } from '../../auth.config.js';

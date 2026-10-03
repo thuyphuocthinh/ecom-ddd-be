@@ -5,7 +5,7 @@ import { EMAIL_SENDER } from './email-sender.port.js';
 import { EMAIL_DISPATCHER } from './email-dispatcher.port.js';
 import { EmailDispatcher } from './email.job.js';
 import { LogEmailSender } from './log-email-sender.js';
-import { JobQueueModule } from '../jobs/job-queue.module.js';
+import { JobQueueModule } from '../messaging/jobs/job-queue.module.js';
 
 describe('EmailModule', () => {
   const original = { ...process.env };

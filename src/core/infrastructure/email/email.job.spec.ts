@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EmailDispatcher, EmailJobHandler, SEND_EMAIL } from './email.job.js';
 import { EmailPayloadCipher } from './email-payload-cipher.js';
 import type { IEmailSender } from './email-sender.port.js';
-import type { IJobQueue } from '../jobs/job-queue.port.js';
+import type { IJobQueue } from '../messaging/jobs/job-queue.port.js';
 
 const MESSAGE = {
   to: 'jane.doe@example.com',

@@ -9,8 +9,8 @@ import {
   JOB_QUEUE_OPTIONS,
   defineJob,
   type IJobQueue,
-} from '../src/core/infrastructure/jobs/job-queue.port.js';
-import { JobQueueModule } from '../src/core/infrastructure/jobs/job-queue.module.js';
+} from '../src/core/infrastructure/messaging/jobs/job-queue.port.js';
+import { JobQueueModule } from '../src/core/infrastructure/messaging/jobs/job-queue.module.js';
 import { EmailModule } from '../src/core/infrastructure/email/email.module.js';
 import { EMAIL_SENDER } from '../src/core/infrastructure/email/email-sender.port.js';
 import { EMAIL_DISPATCHER } from '../src/core/infrastructure/email/email-dispatcher.port.js';

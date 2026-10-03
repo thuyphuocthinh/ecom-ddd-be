@@ -4,8 +4,8 @@ import { Reflector } from '@nestjs/core';
 import { createHash } from 'crypto';
 import { of } from 'rxjs';
 import { RateLimitInterceptor } from './rate-limit.interceptor.js';
-import { RateLimitService } from '../../infrastructure/rate-limit/rate-limit.service.js';
-import { CACHE } from '../../infrastructure/cache/cache.constants.js';
+import { RateLimitService } from '../../infrastructure/redis/rate-limit/rate-limit.service.js';
+import { CACHE } from '../../infrastructure/redis/cache.constants.js';
 
 const makeContext = (req: object) =>
   ({

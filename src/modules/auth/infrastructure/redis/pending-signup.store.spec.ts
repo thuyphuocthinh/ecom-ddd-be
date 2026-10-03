@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { PendingSignupStore } from './pending-signup.store.js';
 import type { RedisService } from '@/core/infrastructure/redis/redis.service.js';
-import { CACHE } from '@/core/infrastructure/cache/cache.constants.js';
+import { CACHE } from '@/core/infrastructure/redis/cache.constants.js';
 import { HashUtil } from '@/core/utils/hash.util.js';
 
 const EMAIL = 'new@example.com';

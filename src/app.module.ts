@@ -9,10 +9,10 @@ import { validateEnv } from './core/config/env.validation.js';
 import { resolveCorrelationId } from './core/utils/correlation-id.util.js';
 import { DatabaseModule } from './core/infrastructure/database/database.module.js';
 import { RedisModule } from './core/infrastructure/redis/redis.module.js';
-import { IdempotencyModule } from './core/infrastructure/idempotency/idempotency.module.js';
-import { RateLimitModule } from './core/infrastructure/rate-limit/rate-limit.module.js';
-import { TokenModule } from './core/infrastructure/token/token.module.js';
-import { JobQueueModule } from './core/infrastructure/jobs/job-queue.module.js';
+import { IdempotencyModule } from './core/infrastructure/redis/idempotency/idempotency.module.js';
+import { RateLimitModule } from './core/infrastructure/redis/rate-limit/rate-limit.module.js';
+import { TokenModule } from './core/infrastructure/redis/token/token.module.js';
+import { JobQueueModule } from './core/infrastructure/messaging/jobs/job-queue.module.js';
 import { EmailModule } from './core/infrastructure/email/email.module.js';
 
 @Module({

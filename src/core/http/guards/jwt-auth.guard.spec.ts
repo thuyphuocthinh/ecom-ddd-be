@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExecutionContext, ServiceUnavailableException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
-import type { TokenStore } from '../../infrastructure/token/token.store.js';
+import type { TokenStore } from '../../infrastructure/redis/token/token.store.js';
 import { DomainException, AuthErrorCodes } from '../../index.js';
 
 const makeContext = (

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RateLimitService } from './rate-limit.service.js';
-import type { RedisService } from '../redis/redis.service.js';
+import type { RedisService } from '../redis.service.js';
 
 const serviceReturning = (count: number | Error) => {
   const evalFn = vi.fn();

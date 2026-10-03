@@ -11,8 +11,8 @@ import { Reflector } from '@nestjs/core';
 import { createHash } from 'crypto';
 import type { Request } from 'express';
 import type { Observable } from 'rxjs';
-import { CACHE } from '../../infrastructure/cache/cache.constants.js';
-import { RateLimitService } from '../../infrastructure/rate-limit/rate-limit.service.js';
+import { CACHE } from '../../infrastructure/redis/cache.constants.js';
+import { RateLimitService } from '../../infrastructure/redis/rate-limit/rate-limit.service.js';
 import {
   RATE_LIMIT_KEY,
   RateLimitKey,
