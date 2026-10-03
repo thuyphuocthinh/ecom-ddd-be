@@ -104,6 +104,9 @@ describe('Auth registration through the RabbitMQ queue (e2e)', () => {
       await remove((c) =>
         c.deleteQueue(`${NAMESPACE}jobs.send-email${suffix}`),
       );
+      await remove((c) =>
+        c.deleteQueue(`${NAMESPACE}jobs.request-password-reset${suffix}`),
+      );
     }
     await remove((c) => c.deleteExchange(`${NAMESPACE}jobs`));
     await admin.close();
@@ -150,6 +153,68 @@ describe('Auth registration through the RabbitMQ queue (e2e)', () => {
 
     expect(typeof verified.body.data.accessToken).toBe('string');
     expect(await prisma.user.count()).toBe(1);
+  });
+
+  it('forgot-password goes through the queue too: the request answers at once and the reset code arrives from the worker', async () => {
+    // an account to reset
+    await register().expect(202);
+    await until(() => mailbox.sent.length === 1, 'the registration email');
+    const registerCode = mailbox.sent[0].text.match(/\b(\d{6})\b/)![1];
+    await request(app.getHttpServer())
+      .post(`${API}/auth/verify-email`)
+      .send({ email: EMAIL, code: registerCode, password: PASSWORD })
+      .expect(200);
+    mailbox.sent.length = 0;
+
+    const started = Date.now();
+    await request(app.getHttpServer())
+      .post(`${API}/auth/forgot-password`)
+      .send({ email: EMAIL })
+      .expect(202);
+    expect(Date.now() - started).toBeLessThan(2_000);
+
+    await until(() => mailbox.sent.length === 1, 'the reset code email');
+    expect(mailbox.sent[0].subject).toContain('Mã đặt lại mật khẩu');
+    const code = mailbox.sent[0].text.match(/\b(\d{6})\b/)![1];
+    await request(app.getHttpServer())
+      .post(`${API}/auth/reset-password`)
+      .send({ email: EMAIL, code, newPassword: '7-purple-Giraffes-dance' })
+      .expect(204);
+  });
+
+  it('forgot-password does not wait for a hanging email provider either (AC-2)', async () => {
+    await register().expect(202);
+    await until(() => mailbox.sent.length === 1, 'the registration email');
+    const registerCode = mailbox.sent[0].text.match(/\b(\d{6})\b/)![1];
+    await request(app.getHttpServer())
+      .post(`${API}/auth/verify-email`)
+      .send({ email: EMAIL, code: registerCode, password: PASSWORD })
+      .expect(200);
+    mailbox.sent.length = 0;
+    let release!: () => void;
+    mailbox.hang = new Promise<void>((resolve) => (release = resolve));
+
+    const started = Date.now();
+    await request(app.getHttpServer())
+      .post(`${API}/auth/forgot-password`)
+      .send({ email: EMAIL })
+      .expect(202);
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(mailbox.sent).toHaveLength(0);
+    release();
+    await until(() => mailbox.sent.length === 1, 'the reset code email');
+  });
+
+  it('forgot-password sends nothing for an address with no account, through the queue as well', async () => {
+    await request(app.getHttpServer())
+      .post(`${API}/auth/forgot-password`)
+      .send({ email: 'nobody@example.com' })
+      .expect(202);
+
+    // give the worker time to run the job, then check that it sent nothing
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(mailbox.sent).toHaveLength(0);
   });
 
   it('resend-verification also goes through the queue and is limited as before (AC-12)', async () => {

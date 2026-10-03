@@ -39,6 +39,7 @@ export * from './infrastructure/redis/token/token.store.js';
 export * from './infrastructure/redis/token/token.module.js';
 export * from './infrastructure/messaging/jobs/job-queue.port.js';
 export * from './infrastructure/messaging/jobs/job-queue.module.js';
+export * from './infrastructure/messaging/jobs/job-payload-cipher.js';
 export * from './infrastructure/email/email-sender.port.js';
 export * from './infrastructure/email/email-dispatcher.port.js';
 export * from './infrastructure/email/email-layout.js';

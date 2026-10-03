@@ -49,10 +49,26 @@ export const CACHE = {
       // One-time codes sent by email (see auth-verification spec)
       OTP_LENGTH: 6,
       OTP_TTL: buildTTL('MINUTE', 10),
-      OTP_MAX_ATTEMPTS: 5, // guesses one client (IP) gets per code before it is locked out of that code
-      OTP_MAX_ATTEMPTS_TOTAL: 30, // guesses from all clients together before the code is destroyed
+
+      // Limits per purpose. A code that leads to a password change gets tighter limits than one
+      // that only confirms a new account.
+      //  perClientAttempts: guesses one client (IP) gets per code before it is locked out of that code
+      //  totalAttempts:     guesses from all clients together before the code is destroyed
+      //  sendsPerHour:      codes that may be sent to one email address per hour
+      OTP_LIMITS: {
+        REGISTER_EMAIL: {
+          perClientAttempts: 5,
+          totalAttempts: 30,
+          sendsPerHour: 5,
+        },
+        RESET_PASSWORD: {
+          perClientAttempts: 3,
+          totalAttempts: 10,
+          sendsPerHour: 3,
+        },
+      },
       OTP_RESEND_COOLDOWN: buildTTL('MINUTE', 5),
-      OTP_MAX_SENDS_PER_HOUR: 5, // per email address
+
       OTP_SENDS_WINDOW: buildTTL('HOUR', 1),
       PENDING_SIGNUP_TTL: buildTTL('MINUTE', 30), // how long a not-yet-verified registration is kept
     },

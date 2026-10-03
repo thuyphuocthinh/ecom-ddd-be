@@ -1,5 +1,12 @@
 export type SessionRevokeReason =
-  'LOGOUT' | 'LOGOUT_OTHERS' | 'LOGOUT_ALL' | 'REUSE_DETECTED' | 'ADMIN';
+  | 'LOGOUT'
+  | 'LOGOUT_OTHERS'
+  | 'LOGOUT_ALL'
+  | 'REUSE_DETECTED'
+  | 'ADMIN'
+  // The password was reset (every session closed) or changed (the other sessions closed)
+  | 'PASSWORD_RESET'
+  | 'PASSWORD_CHANGED';
 
 export interface SessionProps {
   id: string;

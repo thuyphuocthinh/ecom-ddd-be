@@ -101,6 +101,8 @@ enum SessionRevokeReason {
   LOGOUT_ALL
   REUSE_DETECTED
   ADMIN
+  PASSWORD_RESET
+  PASSWORD_CHANGED
 }
 
 // Một dòng = một lần đăng nhập trên một thiết bị. `id` chính là `sid` nằm trong access token.

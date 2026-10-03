@@ -73,6 +73,12 @@ export function validateEnv(
     errors.push(
       `JOB_QUEUE must be one of: ${JOB_QUEUES.join(', ')} (got "${jobQueue}")`,
     );
+  } else if (jobQueue === 'inline' && config.NODE_ENV === 'production') {
+    // Inline runs the work inside the request: forgot-password would then take visibly longer for
+    // an address with an account (look-up, code, email), telling an outsider who is registered
+    errors.push(
+      'JOB_QUEUE=inline runs background work inside the request and is not allowed in production; use rabbitmq',
+    );
   } else if (
     jobQueue === 'rabbitmq' &&
     !LOCAL_ENVIRONMENTS.includes(config.NODE_ENV as string | undefined) &&

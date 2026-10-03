@@ -83,6 +83,28 @@ describe('RevokeOtherSessionsHandler', () => {
     expect(sessionRepo.revokeAllForUser).not.toHaveBeenCalled();
   });
 
+  it('also flags a session that was started between listing and closing, and was closed with the others (AC-16)', async () => {
+    sessionRepo.revokeAllForUser.mockResolvedValue([
+      'sid-b',
+      'sid-c',
+      'sid-new',
+    ]);
+
+    await handler.execute(new RevokeOtherSessionsCommand('user-1', 'sid-a'));
+
+    expect(tokenStore.markSessionsRevoked).toHaveBeenCalledTimes(2);
+    expect(tokenStore.markSessionsRevoked).toHaveBeenLastCalledWith(
+      ['sid-new'],
+      900,
+    );
+  });
+
+  it('flags only once when nothing new appeared', async () => {
+    await handler.execute(new RevokeOtherSessionsCommand('user-1', 'sid-a'));
+
+    expect(tokenStore.markSessionsRevoked).toHaveBeenCalledTimes(1);
+  });
+
   it('succeeds when the current session is the only one', async () => {
     sessionRepo.findActiveByUser.mockResolvedValue([{ id: 'sid-a' }]);
     sessionRepo.revokeAllForUser.mockResolvedValue([]);

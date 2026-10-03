@@ -188,6 +188,19 @@ describe('validateEnv', () => {
       },
     );
 
+    it('refuses the inline queue in production: it would make forgot-password slower for an address with an account (AC-2)', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          NODE_ENV: 'production',
+          JOB_QUEUE: 'inline',
+          EMAIL_PROVIDER: 'smtp',
+          SMTP_HOST: 'smtp.example.com',
+          EMAIL_FROM: 'no-reply@example.com',
+        }),
+      ).toThrow(/JOB_QUEUE=inline/);
+    });
+
     it('does not accept a blank RABBITMQ_URL where one is required', () => {
       expect(() =>
         validateEnv({
@@ -201,14 +214,14 @@ describe('validateEnv', () => {
       ).toThrow(/RABBITMQ_URL/);
     });
 
-    it('does not need RABBITMQ_URL outside production or with the inline queue', () => {
+    it('does not need RABBITMQ_URL in development or with the inline queue (outside production)', () => {
       expect(() =>
         validateEnv({ ...VALID, NODE_ENV: 'development' }),
       ).not.toThrow();
       expect(() =>
         validateEnv({
           ...VALID,
-          NODE_ENV: 'production',
+          NODE_ENV: 'staging',
           JOB_QUEUE: 'inline',
           EMAIL_PROVIDER: 'smtp',
           SMTP_HOST: 'smtp.example.com',

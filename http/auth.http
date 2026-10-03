@@ -168,3 +168,59 @@ Authorization: Bearer {{accessTokenB}}
 ### 13. Đăng xuất TẤT CẢ thiết bị (kể cả thiết bị hiện tại)
 POST {{baseUrl}}/auth/logout-all
 Authorization: Bearer {{accessTokenA}}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Quên mật khẩu và đổi mật khẩu
+# ─────────────────────────────────────────────────────────────────────────────
+# Quên mật khẩu: xin mã → nhận mã qua email → đặt lại. Máy chủ luôn trả 202 cho bước xin mã,
+# dù email có tài khoản hay không (để không ai dò được email nào đã đăng ký). Mã gửi qua email
+# vài giây sau. Đặt lại sẽ đăng xuất MỌI thiết bị và không tự đăng nhập: phải đăng nhập lại.
+
+@newPassword = 7-purple-Giraffes-dance
+@resetCode = 000000
+
+### 14. Quên mật khẩu: xin mã đặt lại (5 lần/15 phút/IP; mỗi email cách nhau 5 phút, tối đa 3 mã/giờ)
+POST {{baseUrl}}/auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+
+### 15. Đặt lại mật khẩu bằng mã trong email (sai 3 lần từ cùng một IP thì IP đó bị khoá với mã này)
+# Mật khẩu mới quá dễ đoán → 400 mã AUTH-010 kèm "reason"; mã không bị tính một lần thử.
+POST {{baseUrl}}/auth/reset-password
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "code": "{{resetCode}}",
+  "newPassword": "{{newPassword}}"
+}
+
+
+### 16. Đổi mật khẩu khi đang đăng nhập (5 lần/15 phút/user). Các thiết bị khác bị đăng xuất, thiết bị này vẫn dùng tiếp
+# Sai mật khẩu hiện tại → 400 AUTH-012. Mật khẩu mới trùng mật khẩu hiện tại → 400 AUTH-010 (reason SAME_AS_CURRENT).
+POST {{baseUrl}}/auth/change-password
+Authorization: Bearer {{accessTokenA}}
+Content-Type: application/json
+
+{
+  "currentPassword": "{{password}}",
+  "newPassword": "{{newPassword}}"
+}
+
+
+### 17. Đăng nhập lại bằng mật khẩu MỚI (sau bước 15 hoặc 16). Mật khẩu cũ phải trả 401
+# Thứ tự thử quên mật khẩu: 14 (xin mã) → đọc mã trong email, dán vào @resetCode → 15 (đặt lại) → 17 (đăng nhập).
+# Thứ tự thử đổi mật khẩu: 2 (đăng nhập A) → 3 (đăng nhập B) → 16 (đổi từ A) → 12 (token của B → 401) → 17.
+# Sau khi đổi, nhớ sửa @password ở đầu file thành mật khẩu mới nếu muốn chạy lại các bước trên.
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{newPassword}}"
+}

@@ -269,9 +269,12 @@ describe('Job queue on RabbitMQ (e2e)', () => {
     adminChannel = await admin.createChannel();
     await adminChannel.checkQueue(names('send-email').main);
     // The encrypted payload of MESSAGE, made the way the dispatcher makes it
-    const { EmailPayloadCipher } =
-      await import('../src/core/infrastructure/email/email-payload-cipher.js');
-    const payload = new EmailPayloadCipher('s'.repeat(32)).encrypt(MESSAGE);
+    const { JobPayloadCipher } =
+      await import('../src/core/infrastructure/messaging/jobs/job-payload-cipher.js');
+    const payload = new JobPayloadCipher(
+      's'.repeat(32),
+      'jobs-email-v1',
+    ).encrypt(MESSAGE);
     adminChannel.sendToQueue(
       names('send-email').main,
       Buffer.from(JSON.stringify({ payload })),
@@ -289,7 +292,11 @@ describe('Job queue on RabbitMQ (e2e)', () => {
     const rabbit = moduleRef.get(RabbitMQService);
     const connection = (rabbit as any).connection as amqp.ChannelModel;
 
-    // Cut the connection the way a network failure would
+    // Make the broker unreachable (a wrong port) and cut the connection the way a network
+    // failure would. Without the wrong port the service reconnects within milliseconds and
+    // the "away" moment is too short to observe.
+    const goodUrl = process.env.RABBITMQ_URL;
+    process.env.RABBITMQ_URL = 'amqp://admin:admin@localhost:5999';
     (connection as any).connection.stream.destroy(
       new Error('connection cut by the test'),
     );
@@ -304,7 +311,8 @@ describe('Job queue on RabbitMQ (e2e)', () => {
     });
     expect(Date.now() - started).toBeLessThan(1_000);
 
-    // The service reconnects by itself and the workers listen again
+    // The broker is reachable again: the service reconnects by itself and the workers listen again
+    process.env.RABBITMQ_URL = goodUrl;
     await until(() => rabbit.isConnected(), 'the reconnection', 15_000);
     await dispatcher().dispatch(MESSAGE);
     await until(

@@ -193,4 +193,31 @@ describe('TokenStore', () => {
       await expect(store.getRotationGrace('old-rt')).resolves.toBeNull();
     });
   });
+
+  describe('clearSessionsRevoked', () => {
+    it('removes the revoked flag of each given session', async () => {
+      const del = vi.fn().mockResolvedValue(2);
+      const store = new TokenStore({
+        getClient: () => ({ del }),
+      } as unknown as RedisService);
+
+      await store.clearSessionsRevoked(['sid-a', 'sid-b']);
+
+      expect(del).toHaveBeenCalledWith(
+        CACHE.AUTH.KEYS.SESSION_REVOKED('sid-a'),
+        CACHE.AUTH.KEYS.SESSION_REVOKED('sid-b'),
+      );
+    });
+
+    it('does nothing for an empty list', async () => {
+      const del = vi.fn();
+      const store = new TokenStore({
+        getClient: () => ({ del }),
+      } as unknown as RedisService);
+
+      await store.clearSessionsRevoked([]);
+
+      expect(del).not.toHaveBeenCalled();
+    });
+  });
 });

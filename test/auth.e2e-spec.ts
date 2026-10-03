@@ -1055,7 +1055,11 @@ describe('Auth (e2e)', () => {
       const code = codeSentTo('new@example.com');
       await redisStore
         .getClient()
-        .hset(otpKey(), 'attempts', CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS_TOTAL);
+        .hset(
+          otpKey(),
+          'attempts',
+          CACHE.AUTH.SETTINGS.OTP_LIMITS.REGISTER_EMAIL.totalAttempts,
+        );
 
       await verifyEmail(app, 'new@example.com', wrongCodeFor(code)).expect(400);
 

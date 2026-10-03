@@ -30,11 +30,22 @@ export class RevokeOtherSessionsHandler implements ICommandHandler<RevokeOtherSe
       otherSessionIds,
       this.tokenIssuer.accessTtlSeconds,
     );
-    await this.sessionRepo.revokeAllForUser(
+    const closedIds = await this.sessionRepo.revokeAllForUser(
       command.userId,
       'LOGOUT_OTHERS',
       now,
       command.currentSessionId,
     );
+
+    // A session that was started between listing and closing is closed too but was not
+    // flagged above: flag it now, or its access token would keep working for up to 15 minutes
+    const alreadyFlagged = new Set(otherSessionIds);
+    const missed = closedIds.filter((id) => !alreadyFlagged.has(id));
+    if (missed.length > 0) {
+      await this.tokenStore.markSessionsRevoked(
+        missed,
+        this.tokenIssuer.accessTtlSeconds,
+      );
+    }
   }
 }

@@ -9,9 +9,9 @@ import { AuthDomainException, type OtpPurpose } from '../../domain/index.js';
 import { OtpStore } from '../../infrastructure/index.js';
 
 /**
- * One-time codes sent to an email address. Purpose-independent (registration now,
- * password reset later): it only knows how to hand out a code, check one, and limit
- * how often codes are sent.
+ * One-time codes sent to an email address, for registration and for password reset. It only
+ * knows how to hand out a code, check one, and limit how often codes are sent; each purpose
+ * has its own keys, its own limits and its own part in what is hashed.
  *
  * Only a keyed hash of the code is kept (in Redis). A 6-digit code has just a million
  * possibilities, so a plain hash would be reversed instantly by anyone who saw

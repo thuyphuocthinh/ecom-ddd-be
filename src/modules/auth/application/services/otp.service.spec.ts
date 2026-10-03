@@ -4,8 +4,9 @@ import { AuthErrorCodes, CACHE } from '@/core/index.js';
 import { HashUtil } from '@/core/utils/hash.util.js';
 import type { OtpStore } from '../../infrastructure/index.js';
 
-const PER_CLIENT = CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS;
-const TOTAL = CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS_TOTAL;
+const LIMITS = CACHE.AUTH.SETTINGS.OTP_LIMITS.REGISTER_EMAIL;
+const PER_CLIENT = LIMITS.perClientAttempts;
+const TOTAL = LIMITS.totalAttempts;
 const EMAIL = 'new@example.com';
 const ME = '203.0.113.7';
 const SOMEONE_ELSE = '198.51.100.9';
@@ -145,6 +146,20 @@ describe('OtpService', () => {
 
       await expect(
         service.verify('REGISTER_EMAIL', 'other@example.com', code, ME),
+      ).resolves.toBe(false);
+      await expect(
+        service.verify('REGISTER_EMAIL', EMAIL, code, ME),
+      ).resolves.toBe(true);
+    });
+
+    it('does not accept a registration code as a password reset code: the purpose is part of what is hashed (AC-6)', async () => {
+      const code = await service.issue('REGISTER_EMAIL', EMAIL);
+      // Put the registration code hash where a reset code would be
+      const registration = store.codes.get(`REGISTER_EMAIL:${EMAIL}`)!;
+      await store.saveCode('RESET_PASSWORD', EMAIL, registration.hash);
+
+      await expect(
+        service.verify('RESET_PASSWORD', EMAIL, code, ME),
       ).resolves.toBe(false);
       await expect(
         service.verify('REGISTER_EMAIL', EMAIL, code, ME),

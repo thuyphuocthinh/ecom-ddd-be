@@ -8,7 +8,9 @@ export type WeakPasswordReason =
   /** Contains the user's own email (or the name part of it). */
   | 'CONTAINS_EMAIL'
   /** Contains a word of the shop's name. */
-  | 'CONTAINS_APP_NAME';
+  | 'CONTAINS_APP_NAME'
+  /** Changing a password to the one it already is (only checked when changing, not by findPasswordWeakness). */
+  | 'SAME_AS_CURRENT';
 
 // Shorter pieces match too many innocent passwords to be worth refusing
 const MIN_WORD_LENGTH = 4;

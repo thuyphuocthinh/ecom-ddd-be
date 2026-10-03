@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EmailDispatcher, EmailJobHandler, SEND_EMAIL } from './email.job.js';
-import { EmailPayloadCipher } from './email-payload-cipher.js';
+import { JobPayloadCipher } from '../messaging/jobs/job-payload-cipher.js';
 import type { IEmailSender } from './email-sender.port.js';
 import type { IJobQueue } from '../messaging/jobs/job-queue.port.js';
 
@@ -12,7 +12,7 @@ const MESSAGE = {
 };
 
 describe('send-email job', () => {
-  let cipher: EmailPayloadCipher;
+  let cipher: JobPayloadCipher;
   let jobs: {
     enqueue: ReturnType<typeof vi.fn>;
     register: ReturnType<typeof vi.fn>;
@@ -20,7 +20,7 @@ describe('send-email job', () => {
   let sender: { send: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
-    cipher = new EmailPayloadCipher('s'.repeat(32));
+    cipher = new JobPayloadCipher('s'.repeat(32), 'jobs-email-v1');
     jobs = { enqueue: vi.fn().mockResolvedValue(undefined), register: vi.fn() };
     sender = { send: vi.fn().mockResolvedValue(undefined) };
   });

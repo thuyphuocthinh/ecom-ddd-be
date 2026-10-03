@@ -4,7 +4,12 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 
 import { UsersModule } from '../users/users.module.js';
-import { JwtAuthGuard, RolesGuard, appConfig } from '@/core/index.js';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  appConfig,
+  JobPayloadCipher,
+} from '@/core/index.js';
 import { authConfig } from './auth.config.js';
 import type { AuthConfig } from './auth.config.js';
 import {
@@ -22,9 +27,16 @@ import {
   SessionIssuer,
   OtpService,
   VerificationMailer,
+  PasswordMailer,
+  ForgotPasswordHandler,
+  ResetPasswordHandler,
+  ChangePasswordHandler,
+  RequestPasswordResetJobHandler,
+  PASSWORD_RESET_PAYLOAD_CIPHER,
 } from './application/index.js';
 import {
   PrismaSessionRepository,
+  PrismaPasswordRepository,
   OtpStore,
   PendingSignupStore,
 } from './infrastructure/index.js';
@@ -41,6 +53,9 @@ const CommandHandlers = [
   ResendVerificationHandler,
   RevokeSessionHandler,
   RevokeOtherSessionsHandler,
+  ForgotPasswordHandler,
+  ResetPasswordHandler,
+  ChangePasswordHandler,
 ];
 
 const QueryHandlers = [ListSessionsHandler];
@@ -69,7 +84,17 @@ const QueryHandlers = [ListSessionsHandler];
     OtpStore,
     PendingSignupStore,
     VerificationMailer,
+    PasswordMailer,
+    RequestPasswordResetJobHandler,
+    {
+      // Protects the address that waits in the queue for a password reset
+      provide: PASSWORD_RESET_PAYLOAD_CIPHER,
+      inject: [authConfig.KEY],
+      useFactory: (config: AuthConfig) =>
+        new JobPayloadCipher(config.jwtSecret, 'jobs-password-reset-v1'),
+    },
     { provide: 'ISessionRepository', useClass: PrismaSessionRepository },
+    { provide: 'IPasswordRepository', useClass: PrismaPasswordRepository },
     ...CommandHandlers,
     ...QueryHandlers,
     JwtAuthGuard,

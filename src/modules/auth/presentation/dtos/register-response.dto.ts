@@ -29,3 +29,12 @@ export class ResendVerificationResponseDto {
   })
   resendAvailableInSeconds!: number;
 }
+
+export class ForgotPasswordResponseDto {
+  @ApiProperty({
+    description:
+      'Seconds to wait before another reset code can be requested. The same answer is given whether or not the address has an account',
+    example: 300,
+  })
+  resendAvailableInSeconds!: number;
+}

@@ -192,6 +192,18 @@ export const AuthErrorCodes = {
     message: 'Password is too easy to guess',
     status: HttpStatus.BAD_REQUEST,
   },
+  // change-password: the current password the user typed is wrong
+  INCORRECT_CURRENT_PASSWORD: {
+    code: 'AUTH-012',
+    message: 'The current password is incorrect',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  // change-password: someone else changed the password between the check and the write
+  PASSWORD_CHANGED_CONCURRENTLY: {
+    code: 'AUTH-013',
+    message: 'The password was changed by another request; try again',
+    status: HttpStatus.CONFLICT,
+  },
   // verify-email: the code is right but the password differs from the one the waiting registration was
   // made with, e.g. someone else registered this address meanwhile. Only the mailbox owner gets this far.
   REGISTRATION_PASSWORD_MISMATCH: {

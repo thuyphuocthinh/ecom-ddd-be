@@ -118,7 +118,7 @@ export class OtpStore {
         CACHE.AUTH.KEYS.OTP_COOLDOWN(purpose, subject),
         CACHE.AUTH.KEYS.OTP_SENT(purpose, subject),
         CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN,
-        CACHE.AUTH.SETTINGS.OTP_MAX_SENDS_PER_HOUR,
+        CACHE.AUTH.SETTINGS.OTP_LIMITS[purpose].sendsPerHour,
         CACHE.AUTH.SETTINGS.OTP_SENDS_WINDOW,
       ),
     );
@@ -170,8 +170,8 @@ export class OtpStore {
         COUNT_ATTEMPT_SCRIPT,
         1,
         CACHE.AUTH.KEYS.OTP(purpose, this.subject(email)),
-        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS,
-        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS_TOTAL,
+        CACHE.AUTH.SETTINGS.OTP_LIMITS[purpose].perClientAttempts,
+        CACHE.AUTH.SETTINGS.OTP_LIMITS[purpose].totalAttempts,
         HashUtil.sha256(clientId),
       ),
     );

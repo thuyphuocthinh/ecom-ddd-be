@@ -52,9 +52,25 @@ describe('OtpStore', () => {
       ]);
       expect(args.slice(4)).toEqual([
         CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN,
-        CACHE.AUTH.SETTINGS.OTP_MAX_SENDS_PER_HOUR,
+        CACHE.AUTH.SETTINGS.OTP_LIMITS.REGISTER_EMAIL.sendsPerHour,
         CACHE.AUTH.SETTINGS.OTP_SENDS_WINDOW,
       ]);
+    });
+
+    it('uses the tighter hourly allowance of a password reset code (AC-4)', async () => {
+      client.eval.mockResolvedValue([1, 0]);
+
+      await store.reserveSend('RESET_PASSWORD', EMAIL);
+
+      const args = client.eval.mock.calls[0];
+      expect(args.slice(2, 4)).toEqual([
+        CACHE.AUTH.KEYS.OTP_COOLDOWN('RESET_PASSWORD', SUBJECT),
+        CACHE.AUTH.KEYS.OTP_SENT('RESET_PASSWORD', SUBJECT),
+      ]);
+      expect(args[5]).toBe(3);
+      expect(args[5]).toBeLessThan(
+        CACHE.AUTH.SETTINGS.OTP_LIMITS.REGISTER_EMAIL.sendsPerHour,
+      );
     });
 
     it('keeps the address itself out of every Redis key', async () => {
@@ -112,11 +128,21 @@ describe('OtpStore', () => {
 
       const args = client.eval.mock.calls[0];
       expect(args.slice(3)).toEqual([
-        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS,
-        CACHE.AUTH.SETTINGS.OTP_MAX_ATTEMPTS_TOTAL,
+        CACHE.AUTH.SETTINGS.OTP_LIMITS.REGISTER_EMAIL.perClientAttempts,
+        CACHE.AUTH.SETTINGS.OTP_LIMITS.REGISTER_EMAIL.totalAttempts,
         HashUtil.sha256(CLIENT),
       ]);
       expect(JSON.stringify(args)).not.toContain(CLIENT);
+    });
+
+    it('applies the tighter guess limits of a password reset code: 3 per client, 10 in total (AC-4)', async () => {
+      client.eval.mockResolvedValue(['hash-of-code', 1, 1]);
+
+      await store.fetchAndCountAttempt('RESET_PASSWORD', EMAIL, CLIENT);
+
+      const args = client.eval.mock.calls[0];
+      expect(args[2]).toBe(CACHE.AUTH.KEYS.OTP('RESET_PASSWORD', SUBJECT));
+      expect(args.slice(3, 5)).toEqual([3, 10]);
     });
 
     it('returns null when there is no live code, the client is locked out or the total was passed', async () => {

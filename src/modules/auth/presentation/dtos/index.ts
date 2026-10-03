@@ -7,3 +7,6 @@ export * from './register-response.dto.js';
 export * from './verify-email.dto.js';
 export * from './resend-verification.dto.js';
 export * from './session-response.dto.js';
+export * from './forgot-password.dto.js';
+export * from './reset-password.dto.js';
+export * from './change-password.dto.js';

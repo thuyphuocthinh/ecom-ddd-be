@@ -10,7 +10,10 @@ import {
   type IEmailSender,
 } from './email-sender.port.js';
 import type { IEmailDispatcher } from './email-dispatcher.port.js';
-import { EmailPayloadCipher } from './email-payload-cipher.js';
+import { JobPayloadCipher } from '../messaging/jobs/job-payload-cipher.js';
+
+/** DI token for the cipher that protects email payloads in the queue. */
+export const EMAIL_PAYLOAD_CIPHER = 'EMAIL_PAYLOAD_CIPHER';
 
 /** What travels through the queue: the whole email, encrypted. */
 export interface SendEmailJobData {
@@ -32,7 +35,7 @@ export const SEND_EMAIL = defineJob<SendEmailJobData>({
 export class EmailDispatcher implements IEmailDispatcher {
   constructor(
     @Inject(JOB_QUEUE) private readonly jobs: IJobQueue,
-    private readonly cipher: EmailPayloadCipher,
+    @Inject(EMAIL_PAYLOAD_CIPHER) private readonly cipher: JobPayloadCipher,
   ) {}
 
   dispatch(message: EmailMessage): Promise<void> {
@@ -48,7 +51,7 @@ export class EmailJobHandler implements OnModuleInit {
   constructor(
     @Inject(JOB_QUEUE) private readonly jobs: IJobQueue,
     @Inject(EMAIL_SENDER) private readonly sender: IEmailSender,
-    private readonly cipher: EmailPayloadCipher,
+    @Inject(EMAIL_PAYLOAD_CIPHER) private readonly cipher: JobPayloadCipher,
   ) {}
 
   onModuleInit(): void {

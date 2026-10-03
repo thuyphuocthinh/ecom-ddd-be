@@ -2,8 +2,12 @@ import { Global, Module } from '@nestjs/common';
 import { EMAIL_SENDER } from './email-sender.port.js';
 import { EMAIL_DISPATCHER } from './email-dispatcher.port.js';
 import { createEmailSender } from './email-sender.factory.js';
-import { EmailPayloadCipher } from './email-payload-cipher.js';
-import { EmailDispatcher, EmailJobHandler } from './email.job.js';
+import { JobPayloadCipher } from '../messaging/jobs/job-payload-cipher.js';
+import {
+  EMAIL_PAYLOAD_CIPHER,
+  EmailDispatcher,
+  EmailJobHandler,
+} from './email.job.js';
 
 // Global: any feature (registration now, password reset and order mails later) can
 // inject the dispatcher without importing a feature module.
@@ -15,9 +19,12 @@ import { EmailDispatcher, EmailJobHandler } from './email.job.js';
       useFactory: () => createEmailSender(process.env),
     },
     {
-      provide: EmailPayloadCipher,
+      provide: EMAIL_PAYLOAD_CIPHER,
       useFactory: () =>
-        new EmailPayloadCipher(process.env.JWT_ACCESS_SECRET as string),
+        new JobPayloadCipher(
+          process.env.JWT_ACCESS_SECRET as string,
+          'jobs-email-v1',
+        ),
     },
     { provide: EMAIL_DISPATCHER, useClass: EmailDispatcher },
     EmailJobHandler,

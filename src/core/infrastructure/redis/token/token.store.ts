@@ -82,6 +82,20 @@ export class TokenStore {
     }
   }
 
+  /**
+   * Takes the revoked flag back off sessions that turned out to be still open (a change that
+   * flagged them and then failed to close them). Without this their access tokens would stay
+   * refused until the flag expires.
+   */
+  async clearSessionsRevoked(sessionIds: string[]): Promise<void> {
+    if (sessionIds.length === 0) {
+      return;
+    }
+    await this.client.del(
+      ...sessionIds.map((id) => CACHE.AUTH.KEYS.SESSION_REVOKED(id)),
+    );
+  }
+
   async isSessionRevoked(sessionId: string): Promise<boolean> {
     return (
       (await this.client.get(CACHE.AUTH.KEYS.SESSION_REVOKED(sessionId))) ===
