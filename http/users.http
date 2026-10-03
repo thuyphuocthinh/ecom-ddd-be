@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Hồ sơ cá nhân (user-profile) — test API bằng extension "REST Client" của VS Code
+# (humao.rest-client). Bấm "Send Request" ngay phía trên dòng GET/PATCH/PUT/DELETE.
+#
+# Cần một tài khoản đã đăng ký (xem http/auth.http). Request 1 đăng nhập để lấy token.
+#
+# Ảnh đại diện lưu ở Cloudinary. Muốn tải ảnh thật lên, đặt 3 biến trong .env rồi khởi động lại server:
+#   CLOUDINARY_CLOUD_NAME=...   CLOUDINARY_API_KEY=...   CLOUDINARY_API_SECRET=...
+# (xem backend/docs/user-profile.md). Chưa đặt thì tải ảnh trả 503 STO-001, các request khác vẫn chạy.
+#
+# Request 5 cần một file ảnh thật: đặt file avatar.png (hoặc .jpg/.webp, tối đa 2 MB) cạnh file này
+# rồi sửa đường dẫn sau dấu "<" nếu tên khác.
+#
+# Giới hạn: sửa tên 20 lần/15 phút/user; tải ảnh 5 lần/giờ/user; xóa ảnh 20 lần/15 phút/user.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@email = thuyphuocthinhtpt+1@gmail.com
+@password = 123456Aa
+
+# Lấy tự động từ response của request 1 (không cần sửa)
+@accessToken = {{login.response.body.$.data.accessToken}}
+
+
+### 1. Đăng nhập để lấy token (5 lần/15 phút/IP)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+
+### 2. Xem hồ sơ của mình (có email, hasPassword, googleLinked)
+GET {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Sửa tên hiển thị (khoảng trắng thừa được dọn; rỗng hoặc quá 100 ký tự → 400)
+PATCH {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "displayName": "Nguyễn Văn A"
+}
+
+
+### 4. Tên không hợp lệ → 400 (chỉ có khoảng trắng)
+PATCH {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "displayName": "     "
+}
+
+
+### 5. Tải ảnh đại diện (JPEG, PNG, WebP, tối đa 2 MB; trường tên "file")
+# Máy chủ kiểm tra loại file bằng các byte đầu, không tin tên file hay Content-Type.
+# Quá 2 MB → 413; sai loại (SVG, GIF, file văn bản đổi đuôi...) → 400 USR-003; chưa cấu hình Cloudinary → 503 STO-001.
+PUT {{baseUrl}}/users/me/avatar
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----EcomBoundary
+
+------EcomBoundary
+Content-Disposition: form-data; name="file"; filename="avatar.png"
+Content-Type: image/png
+
+< ./avatar.png
+------EcomBoundary--
+
+
+### 6. Thử gửi file sai loại → 400 USR-003 (nội dung là chữ, dù khai là PNG)
+PUT {{baseUrl}}/users/me/avatar
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----EcomBoundary
+
+------EcomBoundary
+Content-Disposition: form-data; name="file"; filename="fake.png"
+Content-Type: image/png
+
+đây không phải là ảnh
+------EcomBoundary--
+
+
+### 7. Xóa ảnh đại diện (204, kể cả khi chưa có ảnh; ảnh Google cũng bị xóa và không tự quay lại)
+DELETE {{baseUrl}}/users/me/avatar
+Authorization: Bearer {{accessToken}}

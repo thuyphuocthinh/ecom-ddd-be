@@ -32,6 +32,28 @@ export class User {
     return new User(id, role, displayName, avatarUrl, now, now, []);
   }
 
+  /** The address of the email credential, which every account has. */
+  public get email(): string | null {
+    return this.emailCredential?.identifier ?? null;
+  }
+
+  /** Whether the account can log in with a password (a Google-only account cannot). */
+  public get hasPassword(): boolean {
+    return this.emailCredential?.secret != null;
+  }
+
+  public get googleLinked(): boolean {
+    return this.credentials.some(
+      (c) => c.provider === CredentialProvider.GOOGLE,
+    );
+  }
+
+  private get emailCredential(): UserCredential | undefined {
+    return this.credentials.find(
+      (c) => c.provider === CredentialProvider.EMAIL,
+    );
+  }
+
   public addCredential(
     id: string,
     provider: CredentialProvider,

@@ -49,6 +49,28 @@ export class PrismaUserRepository implements IUserRepository {
     return credential ? UserMapper.toDomain(credential.user) : null;
   }
 
+  async updateDisplayName(
+    userId: string,
+    displayName: string,
+  ): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: userId },
+      data: { displayName },
+    });
+    return count > 0;
+  }
+
+  async setAvatarUrl(
+    userId: string,
+    avatarUrl: string | null,
+  ): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: userId },
+      data: { avatarUrl },
+    });
+    return count > 0;
+  }
+
   async save(user: User): Promise<void> {
     this.logger.debug(`Saving user: ${user.id}`);
     const data = UserMapper.toPersistence(user);

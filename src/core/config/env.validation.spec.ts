@@ -309,4 +309,72 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
   });
+
+  describe('Cloudinary (profile pictures)', () => {
+    const ALL = {
+      ...VALID,
+      CLOUDINARY_CLOUD_NAME: 'demo-cloud',
+      CLOUDINARY_API_KEY: '123456789012345',
+      CLOUDINARY_API_SECRET: 'not-a-real-secret',
+    };
+
+    it('is optional: no settings at all is fine', () => {
+      expect(() => validateEnv({ ...VALID })).not.toThrow();
+    });
+
+    it('accepts all three, with or without a folder', () => {
+      expect(() => validateEnv(ALL)).not.toThrow();
+      expect(() =>
+        validateEnv({ ...ALL, CLOUDINARY_FOLDER: 'ecom/avatars' }),
+      ).not.toThrow();
+    });
+
+    it.each([
+      'CLOUDINARY_CLOUD_NAME',
+      'CLOUDINARY_API_KEY',
+      'CLOUDINARY_API_SECRET',
+    ])(
+      'refuses a partial setting, naming what is missing (%s absent)',
+      (missing) => {
+        const partial: Record<string, unknown> = { ...ALL };
+        delete partial[missing];
+        expect(() => validateEnv(partial)).toThrow(
+          new RegExp('missing: ' + missing),
+        );
+      },
+    );
+
+    it('treats a blank value as missing', () => {
+      expect(() =>
+        validateEnv({ ...ALL, CLOUDINARY_API_SECRET: '   ' }),
+      ).toThrow(/CLOUDINARY_API_SECRET/);
+    });
+
+    it.each(['a b', 'x/y', 'cloud.name', '../x'])(
+      'refuses the cloud name %j (it ends up in an address)',
+      (name) => {
+        expect(() =>
+          validateEnv({ ...ALL, CLOUDINARY_CLOUD_NAME: name }),
+        ).toThrow(/CLOUDINARY_CLOUD_NAME/);
+      },
+    );
+
+    it.each(['/ecom', 'ecom/', 'ecom//avatars', '../avatars', 'a b'])(
+      'refuses the folder %j',
+      (folder) => {
+        expect(() =>
+          validateEnv({ ...ALL, CLOUDINARY_FOLDER: folder }),
+        ).toThrow(/CLOUDINARY_FOLDER/);
+      },
+    );
+
+    it('never puts the secret in the error message', () => {
+      try {
+        validateEnv({ ...ALL, CLOUDINARY_CLOUD_NAME: 'bad name' });
+        expect.unreachable();
+      } catch (error) {
+        expect(String(error)).not.toContain('not-a-real-secret');
+      }
+    });
+  });
 });

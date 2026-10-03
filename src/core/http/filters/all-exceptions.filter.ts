@@ -52,6 +52,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (typeof retryAfter === 'number' && retryAfter > 0) {
         response.setHeader('Retry-After', String(Math.ceil(retryAfter)));
       }
+    } else if (isMulterError(exception)) {
+      // A bad upload (wrong field name, too many files, too big). Nest maps only some of
+      // multer's messages, so the rest would surface as a 500; they are all the sender's doing.
+      status =
+        exception.code === 'LIMIT_FILE_SIZE'
+          ? HttpStatus.PAYLOAD_TOO_LARGE
+          : HttpStatus.BAD_REQUEST;
+      message = exception.message;
+      code = `HTTP_${status}`;
     }
     // Anything else is an unexpected failure (Prisma, Redis, a bug...). Its message
     // can carry SQL, table/column names or connection details, so the client only
@@ -72,4 +81,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
     });
   }
+}
+
+interface MulterErrorLike extends Error {
+  code: string;
+}
+
+/** multer's own error, recognised by name so this file does not depend on the multer package. */
+function isMulterError(exception: unknown): exception is MulterErrorLike {
+  return (
+    exception instanceof Error &&
+    exception.name === 'MulterError' &&
+    typeof (exception as { code?: unknown }).code === 'string'
+  );
 }

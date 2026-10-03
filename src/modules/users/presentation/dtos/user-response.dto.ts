@@ -16,4 +16,15 @@ export class UserResponseDto {
 
   @ApiProperty({ description: 'Account creation time' })
   createdAt: Date;
+
+  @ApiProperty({ description: 'Email address of the account', nullable: true })
+  email: string | null;
+
+  @ApiProperty({
+    description: 'Whether the account can log in with a password',
+  })
+  hasPassword: boolean;
+
+  @ApiProperty({ description: 'Whether a Google account is linked' })
+  googleLinked: boolean;
 }

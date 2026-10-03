@@ -5,6 +5,15 @@ const EMAIL_PROVIDERS = ['log', 'smtp'];
 const DEV_ONLY_EMAIL_PROVIDERS = ['log'];
 // A Google OAuth client id, e.g. 123456789-abc.apps.googleusercontent.com
 const GOOGLE_CLIENT_ID_PATTERN = /^[\w-]+\.apps\.googleusercontent\.com$/;
+// Cloudinary keeps profile pictures. It is optional, but its three settings go together
+const CLOUDINARY_VARS = [
+  'CLOUDINARY_CLOUD_NAME',
+  'CLOUDINARY_API_KEY',
+  'CLOUDINARY_API_SECRET',
+];
+const CLOUDINARY_CLOUD_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+// A folder path such as ecom/avatars: letters, digits, _ and -, parts separated by one slash
+const CLOUDINARY_FOLDER_PATTERN = /^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/;
 // Where background jobs (sending email) run: on RabbitMQ, or right inside the request (dev, tests)
 const JOB_QUEUES = ['rabbitmq', 'inline'];
 // Where the built-in local RabbitMQ address may be used
@@ -106,6 +115,8 @@ export function validateEnv(
     }
   }
 
+  validateCloudinary(config, errors);
+
   for (const name of OPTIONAL_POSITIVE_INT_VARS) {
     if (config[name] === undefined) continue;
     const value = Number(config[name]);
@@ -155,6 +166,40 @@ function validateSmtp(config: Record<string, unknown>, errors: string[]): void {
   if (!present('EMAIL_FROM') || !(config.EMAIL_FROM as string).includes('@')) {
     errors.push(
       'EMAIL_FROM must be set to a sender address when EMAIL_PROVIDER=smtp, e.g. "Ecom <no-reply@example.com>"',
+    );
+  }
+}
+
+/** Image storage is optional; when any setting is given, all three are needed and must look right. */
+function validateCloudinary(
+  config: Record<string, unknown>,
+  errors: string[],
+): void {
+  const present = (name: string) =>
+    typeof config[name] === 'string' && (config[name] as string).trim() !== '';
+  const given = CLOUDINARY_VARS.filter(present);
+
+  if (given.length > 0 && given.length < CLOUDINARY_VARS.length) {
+    errors.push(
+      `${CLOUDINARY_VARS.join(', ')} must all be set together, or none of them (missing: ${CLOUDINARY_VARS.filter((name) => !present(name)).join(', ')})`,
+    );
+  } else if (
+    present('CLOUDINARY_CLOUD_NAME') &&
+    !CLOUDINARY_CLOUD_NAME_PATTERN.test(
+      (config.CLOUDINARY_CLOUD_NAME as string).trim(),
+    )
+  ) {
+    errors.push(
+      'CLOUDINARY_CLOUD_NAME may only contain letters, digits, _ and -',
+    );
+  }
+
+  if (
+    present('CLOUDINARY_FOLDER') &&
+    !CLOUDINARY_FOLDER_PATTERN.test((config.CLOUDINARY_FOLDER as string).trim())
+  ) {
+    errors.push(
+      'CLOUDINARY_FOLDER must look like ecom/avatars: letters, digits, _ and -, separated by single slashes',
     );
   }
 }

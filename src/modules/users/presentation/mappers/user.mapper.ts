@@ -9,6 +9,9 @@ export class UserMapper {
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,
+      email: user.email,
+      hasPassword: user.hasPassword,
+      googleLinked: user.googleLinked,
     };
   }
 }

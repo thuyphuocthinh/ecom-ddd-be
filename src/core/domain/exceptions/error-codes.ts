@@ -17,6 +17,29 @@ export const CoreErrorCodes = {
     message: 'Validation failed',
     status: HttpStatus.BAD_REQUEST,
   },
+  RESOURCE_BUSY: {
+    code: 'SYS-002',
+    message: 'Another request is changing this right now, please try again',
+    status: HttpStatus.CONFLICT,
+  },
+};
+
+export const StorageErrorCodes = {
+  NOT_CONFIGURED: {
+    code: 'STO-001',
+    message: 'Image upload is not available right now',
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+  },
+  UNAVAILABLE: {
+    code: 'STO-002',
+    message: 'The image could not be saved, please try again later',
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+  },
+  UNREADABLE_IMAGE: {
+    code: 'STO-003',
+    message: 'The file could not be read as an image',
+    status: HttpStatus.BAD_REQUEST,
+  },
 };
 
 export const OrderErrorCodes = {
@@ -130,6 +153,16 @@ export const UserErrorCodes = {
     code: 'USR-002',
     message: 'Email already exists',
     status: HttpStatus.CONFLICT,
+  },
+  INVALID_AVATAR: {
+    code: 'USR-003',
+    message: 'The avatar must be a JPEG, PNG or WebP image of at most 2 MB',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  INVALID_DISPLAY_NAME: {
+    code: 'USR-006',
+    message: 'The display name must contain 1 to 100 visible characters',
+    status: HttpStatus.BAD_REQUEST,
   },
 };
 

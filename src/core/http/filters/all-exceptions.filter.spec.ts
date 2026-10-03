@@ -129,4 +129,35 @@ describe('AllExceptionsFilter', () => {
       expect(body.message).toBe(CoreErrorCodes.SYSTEM_ERROR.message);
     });
   });
+
+  describe('upload errors from multer', () => {
+    const multerError = (code: string, message: string) =>
+      Object.assign(new Error(message), { name: 'MulterError', code });
+
+    it('answers 413 for a file that is too large', () => {
+      const { status: s, body } = respond(
+        multerError('LIMIT_FILE_SIZE', 'File too large'),
+      );
+
+      expect(s).toBe(HttpStatus.PAYLOAD_TOO_LARGE);
+      expect(body.message).toBe('File too large');
+    });
+
+    it.each([
+      ['LIMIT_UNEXPECTED_FILE', 'Unexpected file field'],
+      ['LIMIT_FILE_COUNT', 'Too many files'],
+      ['INVALID_FIELD_NAME', 'Invalid field name'],
+    ])('answers 400, not 500, for %s', (code, message) => {
+      const { status: s, body } = respond(multerError(code, message));
+
+      expect(s).toBe(HttpStatus.BAD_REQUEST);
+      expect(body).toMatchObject({ code: 'HTTP_400', message });
+    });
+
+    it('does not mistake an ordinary error for an upload error', () => {
+      const { status: s } = respond(new Error('MulterError'));
+
+      expect(s).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
+    });
+  });
 });
