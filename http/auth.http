@@ -1,0 +1,165 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth + Sessions — test API bằng extension "REST Client" của VS Code
+# (humao.rest-client). Bấm "Send Request" ngay phía trên dòng POST/GET/...
+#
+# Chạy từ trên xuống: đăng ký → đăng nhập 2 thiết bị → xem thiết bị → thu hồi.
+# Token được lấy tự động từ response của request có "# @name ...".
+#
+# Đăng ký gồm 2 bước: (1) register gửi mã 6 số tới email, (2) verify-email nhập
+# mã để tạo tài khoản. Ở môi trường dev email KHÔNG được gửi thật: mã được in ra
+# log của server (terminal đang chạy `pnpm start:dev`), dòng "Mã xác thực của bạn là: ...".
+#
+# Lưu ý giới hạn: đăng ký 3 lần/giờ/IP, xác thực 10 lần/15 phút/IP, gửi lại 5
+# lần/15 phút/IP (và mỗi email: cách nhau 5 phút, tối đa 5 mã/giờ), đăng nhập 5
+# lần/15 phút/IP. Đừng bấm liên tục; dùng lại token đã lấy (access token sống 15 phút).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@email = thuyphuocthinhtpt+1@gmail.com
+@password = 123456Aa
+
+# Lấy tự động từ response của request tương ứng (không cần sửa)
+@accessTokenA = {{loginA.response.body.$.data.accessToken}}
+@refreshTokenA = {{loginA.response.body.$.data.refreshToken}}
+@accessTokenB = {{loginB.response.body.$.data.accessToken}}
+@refreshTokenB = {{loginB.response.body.$.data.refreshToken}}
+@newRefreshTokenA = {{refreshA.response.body.$.data.refreshToken}}
+
+# Dán id của session muốn thu hồi (lấy từ response của "Danh sách thiết bị")
+@sessionId = dan-id-session-vao-day
+
+# Dán mã 6 số lấy từ log của server sau bước 1
+@verificationCode = 267119
+
+
+### 1. Đăng ký — gửi mã xác thực tới email (chưa tạo tài khoản; email đã có tài khoản → 409)
+# @name register
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}",
+  "displayName": "Demo User"
+}
+
+
+### 1b. Xác thực email bằng mã nhận được (đọc trong log của server) → tạo tài khoản và đăng nhập luôn
+# Sai mã → 400 (tối đa 5 lần nhập sai rồi mã bị huỷ); mã sống 10 phút.
+# Việc này cũng tạo một session cho "thiết bị" gọi nó.
+POST {{baseUrl}}/auth/verify-email
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "code": "{{verificationCode}}"
+}
+
+
+### 1c. Chưa nhận được mã? Gửi lại (cách nhau 5 phút). Không có đăng ký đang chờ (đã quá 30 phút hoặc email đã có tài khoản) → 404, hãy đăng ký lại
+POST {{baseUrl}}/auth/resend-verification
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+
+### 2. Đăng nhập — thiết bị A (giả lập Chrome)
+# @name loginA
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Chrome-Demo/128 (Windows 11)
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+
+### 3. Thông tin của tôi (cần access token)
+GET {{baseUrl}}/users/me
+Authorization: Bearer {{accessTokenA}}
+
+
+### 4. Đăng nhập — thiết bị B (giả lập Firefox) → tạo session thứ hai
+# @name loginB
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Firefox-Demo/130 (macOS)
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+
+### 5. Danh sách thiết bị đang đăng nhập (thiết bị đang gọi có "current": true)
+# @name sessions
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{accessTokenA}}
+
+
+### 6. Thu hồi MỘT thiết bị khác theo id (dán id vào @sessionId ở đầu file)
+# Sau đó thử bước 12 với token của thiết bị bị thu hồi → 401 ngay.
+DELETE {{baseUrl}}/auth/sessions/{{sessionId}}
+Authorization: Bearer {{accessTokenA}}
+
+
+### 7. Đăng xuất TẤT CẢ thiết bị khác (giữ thiết bị hiện tại)
+POST {{baseUrl}}/auth/sessions/revoke-others
+Authorization: Bearer {{accessTokenA}}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Refresh token
+# ─────────────────────────────────────────────────────────────────────────────
+
+### 8. Refresh — đổi refresh token của thiết bị A lấy cặp token mới
+# @name refreshA
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshTokenA}}"
+}
+
+
+### 9. Refresh bằng refresh token MỚI (sau bước 8)
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{newRefreshTokenA}}"
+}
+
+
+### 10. Dùng LẠI refresh token CŨ (sau bước 8)
+# - Trong 15 giây: vẫn 200, trả đúng cặp token của lần đổi trước (2 tab refresh cùng lúc).
+# - Sau 15 giây: 401 và session của thiết bị đó bị thu hồi (phát hiện reuse);
+#   các thiết bị khác không bị ảnh hưởng.
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshTokenA}}"
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Đăng xuất
+# ─────────────────────────────────────────────────────────────────────────────
+
+### 11. Đăng xuất thiết bị hiện tại (A) — body không bắt buộc
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{accessTokenA}}
+
+
+### 12. Kiểm tra token của thiết bị B (sau khi B bị thu hồi / đăng xuất → 401)
+GET {{baseUrl}}/users/me
+Authorization: Bearer {{accessTokenB}}
+
+
+### 13. Đăng xuất TẤT CẢ thiết bị (kể cả thiết bị hiện tại)
+POST {{baseUrl}}/auth/logout-all
+Authorization: Bearer {{accessTokenA}}

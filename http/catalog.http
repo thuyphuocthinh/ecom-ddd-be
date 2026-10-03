@@ -1,0 +1,232 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Catalog (danh mục + sản phẩm) — test API bằng extension "REST Client" của
+# VS Code (humao.rest-client). Bấm "Send Request" ngay phía trên dòng GET/POST/...
+#
+# - Các request ĐỌC (GET) là công khai, không cần đăng nhập.
+# - Các request GHI cần tài khoản ADMIN. Tài khoản mới đăng ký mặc định là
+#   CUSTOMER → ghi sẽ bị 403. Cách nâng quyền (chạy một lần):
+#     1) Đăng ký tài khoản (bước 0 và 0b dưới đây, hoặc file auth.http). Mã xác thực
+#        được in ra log của server (không gửi email thật ở môi trường dev).
+#     2) Chạy SQL (thay <email>):
+#        docker exec ecom_postgres psql -U root -d ecom_db -c "UPDATE \"User\" SET role = 'ADMIN' WHERE id = (SELECT \"userId\" FROM \"UserCredential\" WHERE identifier = '<email>');"
+#     3) Chạy bước 1 để đăng nhập lấy token ADMIN.
+#
+# Chạy từ trên xuống: id của danh mục/sản phẩm/SKU được lấy tự động từ response.
+# Đăng nhập giới hạn 5 lần/15 phút/IP; access token sống 15 phút.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@adminEmail = admin@example.com
+# Đăng ký mới sẽ bị từ chối (400, AUTH-010) nếu mật khẩu dễ đoán như mật khẩu này: đổi sang mật khẩu
+# khác trước bước 0. Nếu admin đã tạo từ trước thì giữ nguyên (đăng nhập không kiểm tra độ mạnh).
+@adminPassword = Password123!
+
+# Dán mã 6 số lấy từ log của server sau bước 0
+@verificationCode = 000000
+
+# Lấy tự động từ response của request tương ứng (không cần sửa)
+@adminToken = {{adminLogin.response.body.$.data.accessToken}}
+@rootCategoryId = {{createRootCategory.response.body.$.data.id}}
+@childCategoryId = {{createChildCategory.response.body.$.data.id}}
+@productId = {{createProduct.response.body.$.data.id}}
+@skuId = {{createProduct.response.body.$.data.skus[0].id}}
+@newSkuId = {{addSku.response.body.$.data.id}}
+@nextCursor = {{listProducts.response.body.$.meta.nextCursor}}
+
+
+### 0. (Tuỳ chọn) Đăng ký tài khoản admin — gửi mã xác thực (xem log server)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}",
+  "displayName": "Admin"
+}
+
+
+### 0b. (Tuỳ chọn) Xác thực email bằng mã — tạo tài khoản; xong nhớ nâng quyền bằng SQL ở đầu file
+POST {{baseUrl}}/auth/verify-email
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "code": "{{verificationCode}}"
+}
+
+
+### 1. Đăng nhập admin
+# @name adminLogin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{adminPassword}}"
+}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# DANH MỤC
+# ═════════════════════════════════════════════════════════════════════════════
+
+### 2. Tạo danh mục gốc (Idempotency-Key tuỳ chọn: gửi lại cùng key trong 24h → trả lại kết quả cũ, không tạo trùng)
+# @name createRootCategory
+POST {{baseUrl}}/catalog/categories
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+Idempotency-Key: demo-root-category-001
+
+{
+  "name": "Thời trang"
+}
+
+
+### 3. Tạo danh mục con
+# @name createChildCategory
+POST {{baseUrl}}/catalog/categories
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Áo thun",
+  "parentId": "{{rootCategoryId}}"
+}
+
+
+### 4. Danh mục gốc (công khai)
+GET {{baseUrl}}/catalog/categories
+
+
+### 5. Danh mục con của một danh mục (công khai)
+GET {{baseUrl}}/catalog/categories?parentId={{rootCategoryId}}
+
+
+### 6. Chi tiết một danh mục (công khai)
+GET {{baseUrl}}/catalog/categories/{{childCategoryId}}
+
+
+### 7. Đổi tên danh mục
+PATCH {{baseUrl}}/catalog/categories/{{childCategoryId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Áo thun nam"
+}
+
+
+### 8. Di chuyển danh mục sang cha khác (newParentId: null = đưa lên gốc)
+PATCH {{baseUrl}}/catalog/categories/{{childCategoryId}}/move
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "newParentId": "{{rootCategoryId}}"
+}
+
+
+### 9. Xoá danh mục (chỉ xoá được khi không có danh mục con và không có sản phẩm)
+DELETE {{baseUrl}}/catalog/categories/{{childCategoryId}}
+Authorization: Bearer {{adminToken}}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SẢN PHẨM
+# ═════════════════════════════════════════════════════════════════════════════
+
+### 10. Tạo sản phẩm kèm SKU (trạng thái ban đầu DRAFT; skuCode phải duy nhất nên có {{$timestamp}})
+# @name createProduct
+POST {{baseUrl}}/catalog/products
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+Idempotency-Key: demo-product-001
+
+{
+  "categoryId": "{{childCategoryId}}",
+  "name": "Áo thun cotton cổ tròn",
+  "description": "Áo thun cotton 100%, form rộng.",
+  "thumbnail": "https://example.com/ao-thun.jpg",
+  "skus": [
+    {
+      "skuCode": "TSHIRT-RED-L-{{$timestamp}}",
+      "price": 199000,
+      "attributes": { "color": "Red", "size": "L" },
+      "barcode": "8931234567890"
+    }
+  ]
+}
+
+
+### 11. Danh sách sản phẩm (công khai, phân trang keyset bằng cursor)
+# @name listProducts
+GET {{baseUrl}}/catalog/products?limit=10
+
+
+### 12. Trang tiếp theo (dùng nextCursor của request 11)
+GET {{baseUrl}}/catalog/products?limit=10&cursor={{nextCursor}}
+
+
+### 13. Lọc: theo danh mục, trạng thái, khoảng giá, từ khoá (đổi/bỏ bớt tham số tuỳ ý)
+# Nếu trả 500 với log `column "searchVector" does not exist`: DB đang thiếu cột tìm kiếm
+# (từng bị `prisma db push` xoá). Khôi phục bằng cách chạy lại SQL trong
+# prisma/migrations/1_add_product_search_vector/migration.sql (có IF NOT EXISTS nên chạy lại an toàn).
+# Bỏ tham số `search` thì các bộ lọc còn lại vẫn chạy bình thường.
+GET {{baseUrl}}/catalog/products?categoryId={{childCategoryId}}&status=PUBLISHED&minPrice=100000&maxPrice=500000&search=%C3%A1o%20thun
+
+
+### 14. Chi tiết sản phẩm (công khai)
+GET {{baseUrl}}/catalog/products/{{productId}}
+
+
+### 15. Cập nhật thông tin sản phẩm
+PATCH {{baseUrl}}/catalog/products/{{productId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Áo thun cotton cổ tròn (bản mới)",
+  "description": "Mô tả đã cập nhật."
+}
+
+
+### 16. Đăng bán (DRAFT → PUBLISHED; cần có ít nhất một SKU giá > 0, nếu không → 400)
+PATCH {{baseUrl}}/catalog/products/{{productId}}/publish
+Authorization: Bearer {{adminToken}}
+
+
+### 17. Ẩn sản phẩm (PUBLISHED → DRAFT)
+PATCH {{baseUrl}}/catalog/products/{{productId}}/unpublish
+Authorization: Bearer {{adminToken}}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SKU
+# ═════════════════════════════════════════════════════════════════════════════
+
+### 18. Thêm một SKU vào sản phẩm (trùng thuộc tính với SKU có sẵn → 409)
+# @name addSku
+POST {{baseUrl}}/catalog/products/{{productId}}/skus
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "skuCode": "TSHIRT-BLUE-XL-{{$timestamp}}",
+  "price": 219000,
+  "attributes": { "color": "Blue", "size": "XL" }
+}
+
+
+### 19. Đổi giá một SKU
+PATCH {{baseUrl}}/catalog/products/{{productId}}/skus/{{skuId}}/price
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "price": 189000
+}
+
+
+### 20. Xoá một SKU
+DELETE {{baseUrl}}/catalog/products/{{productId}}/skus/{{newSkuId}}
+Authorization: Bearer {{adminToken}}
