@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CredentialProvider } from '@prisma/client';
+import { CredentialProvider, UserRole, UserStatus } from '@prisma/client';
 import { User } from './user.entity.js';
 
 const userWith = (
@@ -42,5 +42,23 @@ describe('User sign-in methods', () => {
     expect(user.email).toBeNull();
     expect(user.hasPassword).toBe(false);
     expect(user.googleLinked).toBe(false);
+  });
+
+  it('is active unless it says otherwise', () => {
+    expect(User.create('u-1').isActive).toBe(true);
+    expect(User.create('u-1').status).toBe(UserStatus.ACTIVE);
+
+    const now = new Date();
+    const suspended = new User(
+      'u-2',
+      UserRole.CUSTOMER,
+      null,
+      null,
+      now,
+      now,
+      [],
+      UserStatus.SUSPENDED,
+    );
+    expect(suspended.isActive).toBe(false);
   });
 });

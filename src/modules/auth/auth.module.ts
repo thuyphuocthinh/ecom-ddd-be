@@ -37,6 +37,8 @@ import {
   GoogleLoginHandler,
   LinkGoogleHandler,
   UnlinkGoogleHandler,
+  SuspendUserHandler,
+  ReinstateUserHandler,
   GoogleIdentityService,
   AccountMailer,
 } from './application/index.js';
@@ -52,6 +54,7 @@ import {
 import { AuthController } from './presentation/index.js';
 import { SessionController } from './presentation/controllers/session.controller.js';
 import { GoogleAuthController } from './presentation/controllers/google-auth.controller.js';
+import { AdminUserController } from './presentation/controllers/admin-user.controller.js';
 import { GOOGLE_TOKEN_VERIFIER } from './domain/index.js';
 
 const CommandHandlers = [
@@ -70,6 +73,8 @@ const CommandHandlers = [
   GoogleLoginHandler,
   LinkGoogleHandler,
   UnlinkGoogleHandler,
+  SuspendUserHandler,
+  ReinstateUserHandler,
 ];
 
 const QueryHandlers = [ListSessionsHandler];
@@ -91,7 +96,12 @@ const QueryHandlers = [ListSessionsHandler];
       }),
     }),
   ],
-  controllers: [AuthController, SessionController, GoogleAuthController],
+  controllers: [
+    AuthController,
+    SessionController,
+    GoogleAuthController,
+    AdminUserController,
+  ],
   providers: [
     TokenIssuer,
     SessionIssuer,

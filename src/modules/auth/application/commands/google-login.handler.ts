@@ -1,7 +1,11 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { CredentialProvider, type UserRole } from '@prisma/client';
+import {
+  CredentialProvider,
+  type UserRole,
+  type UserStatus,
+} from '@prisma/client';
 import { GoogleLoginCommand } from './google-login.command.js';
 import {
   AuthErrorCodes,
@@ -23,7 +27,7 @@ import { profileOf } from '../services/google-profile.js';
 import { SessionIssuer } from '../services/session-issuer.service.js';
 
 interface Account {
-  user: { id: string; role: UserRole };
+  user: { id: string; role: UserRole; status: UserStatus };
   isNewUser: boolean;
 }
 
@@ -91,7 +95,7 @@ export class GoogleLoginHandler implements ICommandHandler<GoogleLoginCommand> {
       CredentialProvider.GOOGLE,
       identity.sub,
     );
-    if (linked) return { user: linked, isNewUser: false };
+    if (linked) return { user: this.mustBeActive(linked), isNewUser: false };
 
     // 2. An account with this email
     const sameEmail = await this.userRepo.findByCredential(
@@ -99,11 +103,26 @@ export class GoogleLoginHandler implements ICommandHandler<GoogleLoginCommand> {
       identity.email,
     );
     if (sameEmail) {
-      return this.linkToExisting(sameEmail, identity, attempt);
+      return this.linkToExisting(
+        this.mustBeActive(sameEmail),
+        identity,
+        attempt,
+      );
     }
 
     // 3. A new account
     return this.createAccount(identity, attempt);
+  }
+
+  /**
+   * A suspended account is refused before anything is changed on it: linking Google to it, or
+   * sending the owner a notice, would be a change made on behalf of a person who is locked out.
+   */
+  private mustBeActive(account: User): User {
+    if (!account.isActive) {
+      throw new AuthDomainException(AuthErrorCodes.ACCOUNT_SUSPENDED);
+    }
+    return account;
   }
 
   private async linkToExisting(

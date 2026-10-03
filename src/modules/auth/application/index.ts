@@ -39,3 +39,7 @@ export * from './commands/unlink-google.handler.js';
 export * from './services/google-identity.service.js';
 export * from './services/account-mailer.service.js';
 export * from './services/google-profile.js';
+export * from './commands/suspend-user.command.js';
+export * from './commands/suspend-user.handler.js';
+export * from './commands/reinstate-user.command.js';
+export * from './commands/reinstate-user.handler.js';

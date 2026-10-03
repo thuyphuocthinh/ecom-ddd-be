@@ -31,6 +31,7 @@ export class UserMapper {
       prismaUser.createdAt,
       prismaUser.updatedAt,
       credentials,
+      prismaUser.status,
     );
   }
 
@@ -38,6 +39,7 @@ export class UserMapper {
     return {
       id: user.id,
       role: user.role,
+      status: user.status,
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,

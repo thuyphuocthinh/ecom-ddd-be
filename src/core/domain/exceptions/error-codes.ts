@@ -260,6 +260,18 @@ export const AuthErrorCodes = {
     message: 'No Google account is linked to this account',
     status: HttpStatus.NOT_FOUND,
   },
+  // The person proved who they are, but the account is suspended
+  ACCOUNT_SUSPENDED: {
+    code: 'AUTH-020',
+    message: 'This account has been suspended. Please contact support.',
+    status: HttpStatus.FORBIDDEN,
+  },
+  // Administrators cannot be suspended (lower the role first)
+  ADMIN_CANNOT_BE_SUSPENDED: {
+    code: 'AUTH-021',
+    message: 'An administrator cannot be suspended',
+    status: HttpStatus.FORBIDDEN,
+  },
   // change-password: the current password the user typed is wrong
   INCORRECT_CURRENT_PASSWORD: {
     code: 'AUTH-012',

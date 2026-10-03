@@ -6,7 +6,7 @@ import {
   UserDomainException,
 } from '../../domain/index.js';
 import { UserMapper } from './mappers/user.mapper.js';
-import { CredentialProvider, Prisma } from '@prisma/client';
+import { CredentialProvider, Prisma, UserStatus } from '@prisma/client';
 
 const UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 
@@ -71,6 +71,22 @@ export class PrismaUserRepository implements IUserRepository {
     return count > 0;
   }
 
+  async setStatus(userId: string, status: UserStatus): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: userId },
+      data: { status },
+    });
+    return count > 0;
+  }
+
+  async findStatus(userId: string): Promise<UserStatus | null> {
+    const row = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { status: true },
+    });
+    return row?.status ?? null;
+  }
+
   async save(user: User): Promise<void> {
     this.logger.debug(`Saving user: ${user.id}`);
     const data = UserMapper.toPersistence(user);
@@ -104,6 +120,7 @@ export class PrismaUserRepository implements IUserRepository {
         create: {
           id: data.id,
           role: data.role,
+          status: data.status,
           displayName: data.displayName,
           avatarUrl: data.avatarUrl,
           createdAt: data.createdAt,

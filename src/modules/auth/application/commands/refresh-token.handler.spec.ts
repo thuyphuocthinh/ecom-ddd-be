@@ -8,7 +8,7 @@ import { AuthErrorCodes, HashUtil } from '@/core/index.js';
 import type { TokenStore } from '../../infrastructure/index.js';
 import type { TokenIssuer } from '../services/token-issuer.service.js';
 
-const MOCK_USER = { id: 'user-1', role: 'CUSTOMER' };
+const MOCK_USER = { id: 'user-1', role: 'CUSTOMER', isActive: true };
 const NEW_PAIR = { accessToken: 'new.access.token', refreshToken: 'new-rt' };
 const IP = '198.51.100.9';
 
@@ -248,6 +248,13 @@ describe('RefreshTokenHandler', () => {
 
     it("throws UNAUTHORIZED_ACCESS when the session's user no longer exists", async () => {
       userRepo.findById.mockResolvedValue(null);
+
+      await expectUnauthorized(refresh());
+      expect(sessionRepo.rotate).not.toHaveBeenCalled();
+    });
+
+    it('throws UNAUTHORIZED_ACCESS and rotates nothing when the account is suspended', async () => {
+      userRepo.findById.mockResolvedValue({ ...MOCK_USER, isActive: false });
 
       await expectUnauthorized(refresh());
       expect(sessionRepo.rotate).not.toHaveBeenCalled();

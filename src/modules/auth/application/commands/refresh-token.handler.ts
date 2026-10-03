@@ -60,9 +60,10 @@ export class RefreshTokenHandler implements ICommandHandler<RefreshTokenCommand>
       return this.handleUnknownToken(oldRefreshToken, oldHash, now);
     }
 
-    // 3. The session must still belong to an existing user (needed for the role)
+    // 3. The session must still belong to an existing, active user (needed for the role)
     const user = await this.userRepo.findById(session.userId);
-    if (!user) {
+    // A suspended account has no live sessions (they were closed), so this is only a second lock
+    if (!user || !user.isActive) {
       throw this.invalidRefreshToken('Invalid or expired refresh token');
     }
 

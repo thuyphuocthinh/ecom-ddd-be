@@ -33,6 +33,7 @@ const existingUser = (
 ) => ({
   id: 'user-1',
   role: 'CUSTOMER',
+  isActive: true,
   credentials,
 });
 
@@ -103,6 +104,47 @@ describe('GoogleLoginHandler', () => {
     await handler.execute(login());
 
     expect(identities.authenticate).toHaveBeenCalledWith('id-token', 'nonce-1');
+  });
+
+  describe('a suspended account', () => {
+    const suspended = (
+      credentials: Array<{
+        provider: CredentialProvider;
+        identifier: string;
+      }> = [],
+    ) => ({ ...existingUser(credentials), isActive: false });
+
+    it('is refused with AUTH-020 when its Google account is linked, and no session is started', async () => {
+      accounts(suspended(), null);
+
+      expect(await code(handler.execute(login()))).toBe('AUTH-020');
+
+      expect(sessionIssuer.start).not.toHaveBeenCalled();
+    });
+
+    it('is refused BEFORE anything is changed on it when found by email: no Google link, no notice, no profile fill', async () => {
+      accounts(
+        null,
+        suspended([
+          { provider: CredentialProvider.EMAIL, identifier: IDENTITY.email },
+        ]),
+      );
+
+      expect(await code(handler.execute(login()))).toBe('AUTH-020');
+
+      expect(credentialRepo.linkGoogle).not.toHaveBeenCalled();
+      expect(mailer.sendGoogleLinked).not.toHaveBeenCalled();
+      expect(credentialRepo.fillProfileIfEmpty).not.toHaveBeenCalled();
+      expect(sessionIssuer.start).not.toHaveBeenCalled();
+    });
+
+    it('keeps the Google token used (the refusal is about the account, not a failure to retry)', async () => {
+      accounts(suspended(), null);
+
+      await code(handler.execute(login()));
+
+      expect(identities.release).not.toHaveBeenCalled();
+    });
   });
 
   describe('a person with no account yet (AC-1)', () => {

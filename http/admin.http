@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Quản trị — khóa và mở khóa tài khoản (account-suspension)
+# Test bằng extension "REST Client" của VS Code (humao.rest-client).
+#
+# Cần một tài khoản ADMIN. Hệ thống không có API cấp quyền ADMIN (cố ý, để đơn giản): đổi bằng SQL, ví dụ
+#   UPDATE "User" SET role = 'ADMIN' WHERE id IN (
+#     SELECT "userId" FROM "UserCredential" WHERE provider = 'EMAIL' AND identifier = 'email-cua-ban@gmail.com');
+# rồi ĐĂNG NHẬP LẠI (quyền nằm trong token, token cũ vẫn là CUSTOMER).
+#
+# Lấy id người cần khóa (cột id của bảng "User"), dán vào @targetUserId.
+# Người bị khóa: mất mọi phiên ngay, đăng nhập đúng mật khẩu vẫn trả 403 AUTH-020 cho tới khi được mở khóa.
+# Không khóa được ADMIN (403 AUTH-021): muốn khóa một admin thì hạ quyền bằng SQL trước.
+# Giới hạn: 30 lần/15 phút/admin.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@adminEmail = thuyphuocthinhtpt+1@gmail.com
+@password = 123456Aa
+@targetUserId = dan-id-nguoi-dung-vao-day
+
+# Lấy tự động từ response của request 1 (không cần sửa)
+@adminToken = {{adminLogin.response.body.$.data.accessToken}}
+
+
+### 1. Admin đăng nhập (5 lần/15 phút/IP)
+# @name adminLogin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{password}}"
+}
+
+
+### 2. Khóa tài khoản: đóng mọi phiên, token hiện có bị từ chối ngay (204; khóa lại lần nữa cũng 204)
+POST {{baseUrl}}/admin/users/{{targetUserId}}/suspend
+Authorization: Bearer {{adminToken}}
+
+
+### 3. Mở khóa (204). Các phiên cũ không được khôi phục: người đó phải đăng nhập lại
+POST {{baseUrl}}/admin/users/{{targetUserId}}/reinstate
+Authorization: Bearer {{adminToken}}

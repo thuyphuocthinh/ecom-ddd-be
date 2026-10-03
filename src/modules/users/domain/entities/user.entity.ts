@@ -1,4 +1,4 @@
-import { CredentialProvider, UserRole } from '@prisma/client';
+import { CredentialProvider, UserRole, UserStatus } from '@prisma/client';
 
 export class UserCredential {
   constructor(
@@ -20,7 +20,12 @@ export class User {
     public readonly createdAt: Date,
     public updatedAt: Date,
     public readonly credentials: UserCredential[] = [],
+    public readonly status: UserStatus = UserStatus.ACTIVE,
   ) {}
+
+  public get isActive(): boolean {
+    return this.status === UserStatus.ACTIVE;
+  }
 
   public static create(
     id: string,
