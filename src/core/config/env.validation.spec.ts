@@ -231,6 +231,44 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('GOOGLE_CLIENT_IDS', () => {
+    it('is optional: without it sign in with Google is simply off', () => {
+      expect(() => validateEnv({ ...VALID })).not.toThrow();
+      expect(() =>
+        validateEnv({ ...VALID, GOOGLE_CLIENT_IDS: '' }),
+      ).not.toThrow();
+    });
+
+    it('accepts one or several Google client ids (web, Android, iOS)', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          GOOGLE_CLIENT_IDS: '123-abc.apps.googleusercontent.com',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          GOOGLE_CLIENT_IDS:
+            '123-abc.apps.googleusercontent.com, 456-def.apps.googleusercontent.com',
+        }),
+      ).not.toThrow();
+    });
+
+    it.each([
+      'not-an-id',
+      'abc.example.com',
+      '123-abc.apps.googleusercontent.com,oops',
+    ])(
+      'rejects "%s" with a message that says no client secret is needed',
+      (GOOGLE_CLIENT_IDS) => {
+        expect(() => validateEnv({ ...VALID, GOOGLE_CLIENT_IDS })).toThrow(
+          /GOOGLE_CLIENT_IDS.*client secret is not needed/,
+        );
+      },
+    );
+  });
+
   describe('JWT settings', () => {
     it('throws when JWT_ACCESS_SECRET is missing', () => {
       expect(() => validateEnv({ DATABASE_URL: VALID.DATABASE_URL })).toThrow(

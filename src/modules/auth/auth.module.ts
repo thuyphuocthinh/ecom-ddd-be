@@ -11,6 +11,7 @@ import {
   JobPayloadCipher,
 } from '@/core/index.js';
 import { authConfig } from './auth.config.js';
+import { googleConfig, type GoogleConfig } from './google.config.js';
 import type { AuthConfig } from './auth.config.js';
 import {
   RegisterHandler,
@@ -33,15 +34,25 @@ import {
   ChangePasswordHandler,
   RequestPasswordResetJobHandler,
   PASSWORD_RESET_PAYLOAD_CIPHER,
+  GoogleLoginHandler,
+  LinkGoogleHandler,
+  UnlinkGoogleHandler,
+  GoogleIdentityService,
+  AccountMailer,
 } from './application/index.js';
 import {
   PrismaSessionRepository,
   PrismaPasswordRepository,
+  PrismaCredentialRepository,
+  JoseGoogleTokenVerifier,
+  GoogleTokenStore,
   OtpStore,
   PendingSignupStore,
 } from './infrastructure/index.js';
 import { AuthController } from './presentation/index.js';
 import { SessionController } from './presentation/controllers/session.controller.js';
+import { GoogleAuthController } from './presentation/controllers/google-auth.controller.js';
+import { GOOGLE_TOKEN_VERIFIER } from './domain/index.js';
 
 const CommandHandlers = [
   RegisterHandler,
@@ -56,6 +67,9 @@ const CommandHandlers = [
   ForgotPasswordHandler,
   ResetPasswordHandler,
   ChangePasswordHandler,
+  GoogleLoginHandler,
+  LinkGoogleHandler,
+  UnlinkGoogleHandler,
 ];
 
 const QueryHandlers = [ListSessionsHandler];
@@ -67,6 +81,7 @@ const QueryHandlers = [ListSessionsHandler];
     UsersModule,
     ConfigModule.forFeature(authConfig),
     ConfigModule.forFeature(appConfig),
+    ConfigModule.forFeature(googleConfig),
     JwtModule.registerAsync({
       imports: [ConfigModule.forFeature(authConfig)],
       inject: [authConfig.KEY],
@@ -76,7 +91,7 @@ const QueryHandlers = [ListSessionsHandler];
       }),
     }),
   ],
-  controllers: [AuthController, SessionController],
+  controllers: [AuthController, SessionController, GoogleAuthController],
   providers: [
     TokenIssuer,
     SessionIssuer,
@@ -95,6 +110,17 @@ const QueryHandlers = [ListSessionsHandler];
     },
     { provide: 'ISessionRepository', useClass: PrismaSessionRepository },
     { provide: 'IPasswordRepository', useClass: PrismaPasswordRepository },
+    { provide: 'ICredentialRepository', useClass: PrismaCredentialRepository },
+    GoogleTokenStore,
+    GoogleIdentityService,
+    AccountMailer,
+    {
+      // Checks Google ID tokens against Google's public keys; no secret is involved
+      provide: GOOGLE_TOKEN_VERIFIER,
+      inject: [googleConfig.KEY],
+      useFactory: (config: GoogleConfig) =>
+        new JoseGoogleTokenVerifier(config.clientIds),
+    },
     ...CommandHandlers,
     ...QueryHandlers,
     JwtAuthGuard,

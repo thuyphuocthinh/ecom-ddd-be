@@ -3,6 +3,8 @@ const JWT_SECRET_MIN_LENGTH = 32;
 // `smtp` sends through any SMTP server and works in every environment.
 const EMAIL_PROVIDERS = ['log', 'smtp'];
 const DEV_ONLY_EMAIL_PROVIDERS = ['log'];
+// A Google OAuth client id, e.g. 123456789-abc.apps.googleusercontent.com
+const GOOGLE_CLIENT_ID_PATTERN = /^[\w-]+\.apps\.googleusercontent\.com$/;
 // Where background jobs (sending email) run: on RabbitMQ, or right inside the request (dev, tests)
 const JOB_QUEUES = ['rabbitmq', 'inline'];
 // Where the built-in local RabbitMQ address may be used
@@ -89,6 +91,19 @@ export function validateEnv(
     errors.push(
       'RABBITMQ_URL must be set unless NODE_ENV is development, test or unset, when JOB_QUEUE=rabbitmq',
     );
+  }
+
+  // Sign in with Google is optional; when client ids are given each one must look like one
+  if (typeof config.GOOGLE_CLIENT_IDS === 'string') {
+    const ids = config.GOOGLE_CLIENT_IDS.split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    const bad = ids.filter((id) => !GOOGLE_CLIENT_ID_PATTERN.test(id));
+    if (bad.length > 0) {
+      errors.push(
+        'GOOGLE_CLIENT_IDS must be a comma-separated list of Google client ids ending in .apps.googleusercontent.com (a client secret is not needed)',
+      );
+    }
   }
 
   for (const name of OPTIONAL_POSITIVE_INT_VARS) {

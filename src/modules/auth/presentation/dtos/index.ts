@@ -10,3 +10,6 @@ export * from './session-response.dto.js';
 export * from './forgot-password.dto.js';
 export * from './reset-password.dto.js';
 export * from './change-password.dto.js';
+export * from './google-token.dto.js';
+export * from './google-login-response.dto.js';
+export * from './link-google.dto.js';

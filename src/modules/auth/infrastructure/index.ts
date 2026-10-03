@@ -5,3 +5,6 @@ export * from './database/prisma-session.repository.js';
 export * from './redis/otp.store.js';
 export * from './redis/pending-signup.store.js';
 export * from './database/prisma-password.repository.js';
+export * from './google/jose-google-token-verifier.js';
+export * from './redis/google-token.store.js';
+export * from './database/prisma-credential.repository.js';

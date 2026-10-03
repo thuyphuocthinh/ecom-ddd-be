@@ -87,6 +87,9 @@ export const CACHE = {
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:otp_cooldown:${purpose}:${subjectHash}`,
       OTP_SENT: (purpose: string, subjectHash: string) =>
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:otp_sent:${purpose}:${subjectHash}`,
+      // Marks a Google ID token as used (`tokenHash` is the sha256 of the token)
+      GOOGLE_TOKEN: (tokenHash: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:google_token:${tokenHash}`,
       ROTATION_GRACE: (tokenHash: string) =>
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:auth:${CACHE.AUTH._VER}:rotation_grace:${tokenHash}`,
     },

@@ -192,6 +192,41 @@ export const AuthErrorCodes = {
     message: 'Password is too easy to guess',
     status: HttpStatus.BAD_REQUEST,
   },
+  // Sign in with Google: the ID token is not acceptable (bad signature, wrong issuer or audience,
+  // expired, too old, already used, wrong nonce). One answer for all of them.
+  INVALID_GOOGLE_TOKEN: {
+    code: 'AUTH-014',
+    message: 'Invalid Google sign-in token',
+    status: HttpStatus.UNAUTHORIZED,
+  },
+  GOOGLE_EMAIL_NOT_VERIFIED: {
+    code: 'AUTH-015',
+    message: 'The email of this Google account is not verified',
+    status: HttpStatus.FORBIDDEN,
+  },
+  // The account already has a different Google account linked, or this Google account belongs to
+  // someone else
+  GOOGLE_ACCOUNT_CONFLICT: {
+    code: 'AUTH-016',
+    message: 'This account is linked to a different Google account',
+    status: HttpStatus.CONFLICT,
+  },
+  LAST_LOGIN_METHOD: {
+    code: 'AUTH-017',
+    message:
+      'Google is the only way to log in to this account; it cannot be removed',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  GOOGLE_NOT_CONFIGURED: {
+    code: 'AUTH-018',
+    message: 'Sign in with Google is not enabled',
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+  },
+  GOOGLE_NOT_LINKED: {
+    code: 'AUTH-019',
+    message: 'No Google account is linked to this account',
+    status: HttpStatus.NOT_FOUND,
+  },
   // change-password: the current password the user typed is wrong
   INCORRECT_CURRENT_PASSWORD: {
     code: 'AUTH-012',

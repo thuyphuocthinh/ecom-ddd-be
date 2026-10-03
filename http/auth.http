@@ -224,3 +224,43 @@ Content-Type: application/json
   "email": "{{email}}",
   "password": "{{newPassword}}"
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Đăng nhập bằng Google
+# ─────────────────────────────────────────────────────────────────────────────
+# Cần GOOGLE_CLIENT_IDS trong .env (xem docs/google-sign-in.md). Chưa đặt → 503 AUTH-018.
+# Giao diện lấy "credential" từ Google rồi gửi lên đây dưới tên idToken. Để thử khi chưa có giao diện:
+# vào https://developers.google.com/oauthplayground, bấm bánh răng, chọn "Use your own OAuth
+# credentials", dán Client ID và Client Secret (chỉ playground cần secret), chọn scope "openid email
+# profile", bấm Authorize rồi Exchange; copy "id_token" dán vào @googleIdToken.
+# Token chỉ có hiệu lực 10 phút và chỉ dùng được MỘT lần: mỗi lần thử phải lấy token mới.
+
+@googleIdToken = dán-id_token-ở-đây
+
+### 18. Đăng nhập / đăng ký bằng Google (10 lần/15 phút/IP)
+# Chưa có tài khoản → tạo mới (isNewUser: true). Email trùng tài khoản có sẵn → tự liên kết và gửi email báo.
+POST {{baseUrl}}/auth/google
+Content-Type: application/json
+
+{
+  "idToken": "{{googleIdToken}}"
+}
+
+
+### 19. Liên kết Google vào tài khoản đang đăng nhập (5 lần/15 phút/user) — cần token mới
+# Tài khoản có mật khẩu bắt buộc gửi currentPassword (sai hoặc thiếu → 400 AUTH-012, token Google chưa bị dùng).
+# Chủ tài khoản nhận email báo liên kết.
+POST {{baseUrl}}/auth/google/link
+Authorization: Bearer {{accessTokenA}}
+Content-Type: application/json
+
+{
+  "idToken": "{{googleIdToken}}",
+  "currentPassword": "{{password}}"
+}
+
+
+### 20. Hủy liên kết Google (chỉ được khi tài khoản còn mật khẩu; nếu Google là cách duy nhất → 400 AUTH-017)
+DELETE {{baseUrl}}/auth/google
+Authorization: Bearer {{accessTokenA}}
