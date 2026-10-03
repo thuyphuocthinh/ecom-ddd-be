@@ -52,7 +52,6 @@ describe('RegisterHandler', () => {
     mailer = {
       sendCode: vi.fn().mockImplementation(async () => {
         calls.push('send email');
-        return true;
       }),
     };
 

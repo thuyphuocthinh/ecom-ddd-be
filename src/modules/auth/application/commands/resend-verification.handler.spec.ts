@@ -30,7 +30,7 @@ describe('ResendVerificationHandler', () => {
     pendingSignups = {
       get: vi.fn().mockResolvedValue({ passwordHash: 'h', displayName: null }),
     };
-    mailer = { sendCode: vi.fn().mockResolvedValue(true) };
+    mailer = { sendCode: vi.fn().mockResolvedValue(undefined) };
 
     handler = new ResendVerificationHandler(
       otpService as unknown as OtpService,
@@ -93,19 +93,19 @@ describe('ResendVerificationHandler', () => {
     expect(mailer.sendCode).not.toHaveBeenCalled();
   });
 
-  it('gives the slot back and says no wait when the email could not be sent, so the user can ask again at once (AC-10)', async () => {
-    mailer.sendCode.mockResolvedValue(false);
+  it('gives the slot back and fails when the queue cannot take the email, so the user can ask again at once (AC-7)', async () => {
+    mailer.sendCode.mockRejectedValue(new ServiceUnavailableException());
 
-    const result = await handler.execute(resend());
-
-    expect(result).toEqual({ resendAvailableInSeconds: 0 });
+    await expect(handler.execute(resend())).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
     expect(otpService.releaseSend).toHaveBeenCalledWith(
       'REGISTER_EMAIL',
       'new@example.com',
     );
   });
 
-  it('keeps the slot when the email went out (AC-5)', async () => {
+  it('keeps the slot once the email is with the queue (AC-5)', async () => {
     await handler.execute(resend());
 
     expect(otpService.releaseSend).not.toHaveBeenCalled();

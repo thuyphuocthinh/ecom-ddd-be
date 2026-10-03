@@ -84,7 +84,11 @@ describe('validateEnv', () => {
 
     it('is allowed in production, unlike the log adapter', () => {
       expect(() =>
-        validateEnv({ ...SMTP, NODE_ENV: 'production' }),
+        validateEnv({
+          ...SMTP,
+          NODE_ENV: 'production',
+          RABBITMQ_URL: 'amqp://u:p@broker:5672',
+        }),
       ).not.toThrow();
     });
 
@@ -133,6 +137,83 @@ describe('validateEnv', () => {
     it('is not checked when another provider is chosen', () => {
       expect(() =>
         validateEnv({ ...VALID, EMAIL_PROVIDER: 'log' }),
+      ).not.toThrow();
+    });
+  });
+
+  describe('JOB_QUEUE', () => {
+    it('defaults to rabbitmq and accepts rabbitmq or inline', () => {
+      expect(() => validateEnv({ ...VALID })).not.toThrow();
+      expect(() =>
+        validateEnv({ ...VALID, JOB_QUEUE: 'rabbitmq' }),
+      ).not.toThrow();
+      expect(() =>
+        validateEnv({ ...VALID, JOB_QUEUE: 'inline' }),
+      ).not.toThrow();
+    });
+
+    it('rejects any other value with a clear message (AC-13)', () => {
+      expect(() => validateEnv({ ...VALID, JOB_QUEUE: 'kafka' })).toThrow(
+        /JOB_QUEUE must be one of: rabbitmq, inline \(got "kafka"\)/,
+      );
+    });
+
+    it('requires RABBITMQ_URL in production when the queue is rabbitmq, so the local default login is never used (AC-13)', () => {
+      const production = {
+        ...VALID,
+        NODE_ENV: 'production',
+        EMAIL_PROVIDER: 'smtp',
+        SMTP_HOST: 'smtp.example.com',
+        EMAIL_FROM: 'no-reply@example.com',
+      };
+
+      expect(() => validateEnv(production)).toThrow(/RABBITMQ_URL/);
+      expect(() =>
+        validateEnv({ ...production, RABBITMQ_URL: 'amqp://u:p@broker:5672' }),
+      ).not.toThrow();
+    });
+
+    it.each(['staging', 'prod', 'Production'])(
+      'treats NODE_ENV=%s as not local: the default development login is never used there (AC-13)',
+      (NODE_ENV) => {
+        expect(() =>
+          validateEnv({
+            ...VALID,
+            NODE_ENV,
+            EMAIL_PROVIDER: 'smtp',
+            SMTP_HOST: 'smtp.example.com',
+            EMAIL_FROM: 'no-reply@example.com',
+          }),
+        ).toThrow(/RABBITMQ_URL/);
+      },
+    );
+
+    it('does not accept a blank RABBITMQ_URL where one is required', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          NODE_ENV: 'staging',
+          RABBITMQ_URL: '   ',
+          EMAIL_PROVIDER: 'smtp',
+          SMTP_HOST: 'smtp.example.com',
+          EMAIL_FROM: 'no-reply@example.com',
+        }),
+      ).toThrow(/RABBITMQ_URL/);
+    });
+
+    it('does not need RABBITMQ_URL outside production or with the inline queue', () => {
+      expect(() =>
+        validateEnv({ ...VALID, NODE_ENV: 'development' }),
+      ).not.toThrow();
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          NODE_ENV: 'production',
+          JOB_QUEUE: 'inline',
+          EMAIL_PROVIDER: 'smtp',
+          SMTP_HOST: 'smtp.example.com',
+          EMAIL_FROM: 'no-reply@example.com',
+        }),
       ).not.toThrow();
     });
   });

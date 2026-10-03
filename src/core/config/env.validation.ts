@@ -3,6 +3,10 @@ const JWT_SECRET_MIN_LENGTH = 32;
 // `smtp` sends through any SMTP server and works in every environment.
 const EMAIL_PROVIDERS = ['log', 'smtp'];
 const DEV_ONLY_EMAIL_PROVIDERS = ['log'];
+// Where background jobs (sending email) run: on RabbitMQ, or right inside the request (dev, tests)
+const JOB_QUEUES = ['rabbitmq', 'inline'];
+// Where the built-in local RabbitMQ address may be used
+const LOCAL_ENVIRONMENTS = [undefined, 'development', 'test'];
 const OPTIONAL_POSITIVE_INT_VARS = [
   'JWT_ACCESS_TTL_SECONDS',
   'REFRESH_TOKEN_TTL_SECONDS',
@@ -62,6 +66,23 @@ export function validateEnv(
 
   if (emailProvider === 'smtp') {
     validateSmtp(config, errors);
+  }
+
+  const jobQueue = (config.JOB_QUEUE ?? 'rabbitmq') as string;
+  if (!JOB_QUEUES.includes(jobQueue)) {
+    errors.push(
+      `JOB_QUEUE must be one of: ${JOB_QUEUES.join(', ')} (got "${jobQueue}")`,
+    );
+  } else if (
+    jobQueue === 'rabbitmq' &&
+    !LOCAL_ENVIRONMENTS.includes(config.NODE_ENV as string | undefined) &&
+    !(typeof config.RABBITMQ_URL === 'string' && config.RABBITMQ_URL.trim())
+  ) {
+    // The built-in default points at a local broker with the development login, so it is
+    // only for development and tests; production, staging and anything else must say where
+    errors.push(
+      'RABBITMQ_URL must be set unless NODE_ENV is development, test or unset, when JOB_QUEUE=rabbitmq',
+    );
   }
 
   for (const name of OPTIONAL_POSITIVE_INT_VARS) {

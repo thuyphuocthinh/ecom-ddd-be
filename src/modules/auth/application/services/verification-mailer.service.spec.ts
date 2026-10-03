@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Logger } from '@nestjs/common';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { VerificationMailer } from './verification-mailer.service.js';
 import { buildVerificationEmail } from './verification-email.js';
-import type { AppConfig, IEmailSender } from '@/core/index.js';
+import type { AppConfig, IEmailDispatcher } from '@/core/index.js';
 
 describe('buildVerificationEmail', () => {
   const build = () =>
@@ -44,20 +44,22 @@ describe('buildVerificationEmail', () => {
 
 describe('VerificationMailer', () => {
   let mailer: VerificationMailer;
-  let sender: { send: ReturnType<typeof vi.fn> };
+  let dispatcher: { dispatch: ReturnType<typeof vi.fn> };
   const app = { name: 'Ecom' } as AppConfig;
 
   beforeEach(() => {
-    sender = { send: vi.fn().mockResolvedValue(undefined) };
-    mailer = new VerificationMailer(sender as unknown as IEmailSender, app);
+    dispatcher = { dispatch: vi.fn().mockResolvedValue(undefined) };
+    mailer = new VerificationMailer(
+      dispatcher as unknown as IEmailDispatcher,
+      app,
+    );
   });
-  afterEach(() => vi.restoreAllMocks());
 
-  it('sends the email with the code to the address (AC-1)', async () => {
+  it('hands the email with the code to the dispatcher (AC-1)', async () => {
     await mailer.sendCode('a@example.com', '482915');
 
-    expect(sender.send).toHaveBeenCalledOnce();
-    const message = sender.send.mock.calls[0][0];
+    expect(dispatcher.dispatch).toHaveBeenCalledOnce();
+    const message = dispatcher.dispatch.mock.calls[0][0];
     expect(message.to).toBe('a@example.com');
     expect(message.text).toContain('482915');
     expect(message.html).toContain('482915');
@@ -65,62 +67,22 @@ describe('VerificationMailer', () => {
 
   it('uses the configured shop name', async () => {
     mailer = new VerificationMailer(
-      sender as unknown as IEmailSender,
-      {
-        name: 'Cửa hàng An',
-      } as AppConfig,
+      dispatcher as unknown as IEmailDispatcher,
+      { name: 'Cửa hàng An' } as AppConfig,
     );
 
     await mailer.sendCode('a@example.com', '482915');
 
-    expect(sender.send.mock.calls[0][0].subject).toContain('Cửa hàng An');
-  });
-
-  it('reports true once the provider accepted the message', async () => {
-    await expect(mailer.sendCode('a@example.com', '482915')).resolves.toBe(
-      true,
+    expect(dispatcher.dispatch.mock.calls[0][0].subject).toContain(
+      'Cửa hàng An',
     );
   });
 
-  it('does not throw when the provider fails, but reports false: the user can ask for the code again (AC-10)', async () => {
-    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
-    sender.send.mockRejectedValue(new Error('provider down'));
+  it('lets the failure through when the queue cannot take the email, so the caller can give the send slot back (AC-7)', async () => {
+    dispatcher.dispatch.mockRejectedValue(new ServiceUnavailableException());
 
-    await expect(mailer.sendCode('a@example.com', '482915')).resolves.toBe(
-      false,
-    );
-  });
-
-  it('does not log the provider message, which often quotes the recipient (AC-11)', async () => {
-    const error = vi
-      .spyOn(Logger.prototype, 'error')
-      .mockImplementation(() => {});
-    sender.send.mockRejectedValue(
-      Object.assign(new Error('550 5.1.1 <a@example.com> user unknown'), {
-        code: 'EENVELOPE',
-        responseCode: 550,
-      }),
-    );
-
-    await mailer.sendCode('a@example.com', '482915');
-
-    const logged = JSON.stringify(error.mock.calls);
-    expect(logged).toContain('EENVELOPE');
-    expect(logged).toContain('550');
-    expect(logged).not.toContain('a@example.com');
-  });
-
-  it('logs the failure without the code or the address (AC-10, AC-11)', async () => {
-    const error = vi
-      .spyOn(Logger.prototype, 'error')
-      .mockImplementation(() => {});
-    sender.send.mockRejectedValue(new Error('provider down'));
-
-    await mailer.sendCode('a@example.com', '482915');
-
-    const logged = JSON.stringify(error.mock.calls);
-    expect(logged).toContain('Could not send the verification email');
-    expect(logged).not.toContain('482915');
-    expect(logged).not.toContain('a@example.com');
+    await expect(
+      mailer.sendCode('a@example.com', '482915'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });

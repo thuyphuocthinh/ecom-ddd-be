@@ -1326,10 +1326,14 @@ describe('Auth (e2e)', () => {
       mailbox.failing = true;
       const res = await startRegistration(app, 'new@example.com').expect(202);
       expect(mailbox.sent).toHaveLength(0);
-      // Nothing was delivered, so the user is not made to wait for the cooldown
-      expect(res.body.data.resendAvailableInSeconds).toBe(0);
+      // The send happens in the background (retried there); the user gets the normal cooldown
+      expect(res.body.data.resendAvailableInSeconds).toBe(
+        CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN,
+      );
+      await resendFor('new@example.com').expect(429);
 
       mailbox.failing = false;
+      await forgetCooldown('new@example.com');
       await resendFor('new@example.com').expect(202);
       await verifyEmail(
         app,

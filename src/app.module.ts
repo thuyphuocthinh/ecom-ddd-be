@@ -12,6 +12,7 @@ import { RedisModule } from './core/infrastructure/redis/redis.module.js';
 import { IdempotencyModule } from './core/infrastructure/idempotency/idempotency.module.js';
 import { RateLimitModule } from './core/infrastructure/rate-limit/rate-limit.module.js';
 import { TokenModule } from './core/infrastructure/token/token.module.js';
+import { JobQueueModule } from './core/infrastructure/jobs/job-queue.module.js';
 import { EmailModule } from './core/infrastructure/email/email.module.js';
 
 @Module({
@@ -30,6 +31,7 @@ import { EmailModule } from './core/infrastructure/email/email.module.js';
     IdempotencyModule,
     RateLimitModule,
     TokenModule,
+    JobQueueModule,
     EmailModule,
     UsersModule,
     AuthModule,

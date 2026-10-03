@@ -36,24 +36,18 @@ export class ResendVerificationHandler implements ICommandHandler<ResendVerifica
     // The cooldown and the hourly allowance cap how many codes one address gets
     await this.otpService.reserveSend('REGISTER_EMAIL', email);
 
-    let code: string;
     try {
-      code = await this.otpService.issue('REGISTER_EMAIL', email);
+      const code = await this.otpService.issue('REGISTER_EMAIL', email);
+      // Handed to the background queue, which sends it and retries on failure
+      await this.mailer.sendCode(email, code);
     } catch (error) {
+      // No code can reach the user: don't make them wait out the cooldown
       await this.otpService.releaseSend('REGISTER_EMAIL', email);
       throw error;
     }
 
-    // A code that could not be delivered must not cost the user the cooldown
-    const delivered = await this.mailer.sendCode(email, code);
-    if (!delivered) {
-      await this.otpService.releaseSend('REGISTER_EMAIL', email);
-    }
-
     return {
-      resendAvailableInSeconds: delivered
-        ? CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN
-        : 0,
+      resendAvailableInSeconds: CACHE.AUTH.SETTINGS.OTP_RESEND_COOLDOWN,
     };
   }
 }

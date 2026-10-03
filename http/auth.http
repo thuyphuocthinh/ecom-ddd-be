@@ -5,6 +5,10 @@
 # Chạy từ trên xuống: đăng ký → đăng nhập 2 thiết bị → xem thiết bị → thu hồi.
 # Token được lấy tự động từ response của request có "# @name ...".
 #
+# Email được gửi bằng hàng đợi nền (RabbitMQ, cần chạy `docker compose up`): request trả về ngay,
+# thư tới sau vài giây; gửi lỗi thì tự thử lại 3 lần (10s, 30s, 90s). Đặt JOB_QUEUE=inline trong .env
+# nếu không muốn chạy RabbitMQ (thư được gửi ngay trong request).
+#
 # Đăng ký gồm 2 bước: (1) register gửi mã 6 số tới email, (2) verify-email nhập
 # mã để tạo tài khoản. Ở môi trường dev email KHÔNG được gửi thật: mã được in ra
 # log của server (terminal đang chạy `pnpm start:dev`), dòng "Mã xác thực của bạn là: ...".
