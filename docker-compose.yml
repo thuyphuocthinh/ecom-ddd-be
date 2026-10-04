@@ -29,6 +29,10 @@ services:
   rabbitmq:
     image: rabbitmq:3.12-management-alpine
     container_name: ecom_rabbitmq
+    # RabbitMQ keeps its data under a folder named after the node, and the node is named after the
+    # host name. Without a fixed one, a re-created container gets a new random name and starts with
+    # an EMPTY broker, leaving the queues and messages in the volume unused.
+    hostname: ecom-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: admin
       RABBITMQ_DEFAULT_PASS: admin
