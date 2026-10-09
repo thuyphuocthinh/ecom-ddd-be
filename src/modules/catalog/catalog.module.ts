@@ -2,13 +2,19 @@ import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
 // Controllers
-import { ProductController, CategoryController } from './presentation/index.js';
+import {
+  ProductController,
+  CategoryController,
+  AdminProductController,
+  AdminCategoryController,
+} from './presentation/index.js';
 
 // Handlers
 import {
   CreateProductHandler,
   GetProductsHandler,
   GetProductByIdHandler,
+  GetPublishedProductByIdHandler,
   GetCategoryByIdHandler,
   CreateCategoryHandler,
   GetCategoriesHandler,
@@ -45,13 +51,19 @@ const CommandHandlers = [
 const QueryHandlers = [
   GetProductsHandler,
   GetProductByIdHandler,
+  GetPublishedProductByIdHandler,
   GetCategoriesHandler,
   GetCategoryByIdHandler,
 ];
 
 @Module({
   imports: [CqrsModule],
-  controllers: [ProductController, CategoryController],
+  controllers: [
+    ProductController,
+    CategoryController,
+    AdminProductController,
+    AdminCategoryController,
+  ],
   providers: [
     // Repositories
     {

@@ -1,4 +1,5 @@
 export * from './add-sku.dto.js';
+export * from './admin-get-products.dto.js';
 export * from './category-response.dto.js';
 export * from './create-category.dto.js';
 export * from './create-product.dto.js';

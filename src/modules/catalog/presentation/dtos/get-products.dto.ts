@@ -1,11 +1,18 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsNumber, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaginationQueryDto } from '@/core/index.js';
-import { ProductStatus } from '../../domain/index.js';
 
+/**
+ * The public product list. It has no `status` on purpose: customers only ever
+ * get PUBLISHED products, and the global ValidationPipe rejects a `status`
+ * query parameter as an unknown field. Admins use `AdminGetProductsDto`.
+ */
 export class GetProductsDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: 'Filter products by category ID' })
+  @ApiPropertyOptional({
+    description:
+      'Filter products by category ID. Includes the products of every sub-category.',
+  })
   @IsOptional()
   @IsString()
   categoryId?: string;
@@ -16,14 +23,6 @@ export class GetProductsDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
-
-  @ApiPropertyOptional({
-    enum: ProductStatus,
-    description: 'Filter by product status',
-  })
-  @IsOptional()
-  @IsEnum(ProductStatus)
-  status?: ProductStatus;
 
   @ApiPropertyOptional({ description: 'Minimum price filter' })
   @IsOptional()

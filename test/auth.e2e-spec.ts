@@ -678,12 +678,12 @@ describe('Auth (e2e)', () => {
   // ───────────────────────────────────────────────────────────────────────────
   // AC-12: RBAC — CUSTOMER cannot call ADMIN endpoint
   // ───────────────────────────────────────────────────────────────────────────
-  describe('AC-12: RBAC — CUSTOMER → POST /catalog/products → 403', () => {
+  describe('AC-12: RBAC — CUSTOMER → POST /admin/catalog/products → 403', () => {
     it('returns 403 Forbidden when a CUSTOMER tries to create a product', async () => {
       const tokens = await registerAndLogin(app); // default role is CUSTOMER
 
       await request(app.getHttpServer())
-        .post(`${API}/catalog/products`)
+        .post(`${API}/admin/catalog/products`)
         .set('Authorization', `Bearer ${tokens.accessToken}`)
         .send({ name: 'Hack Product', categoryId: 'fake', skus: [] })
         .expect(403);
@@ -693,7 +693,7 @@ describe('Auth (e2e)', () => {
   // ───────────────────────────────────────────────────────────────────────────
   // AC-13: RBAC — ADMIN can call ADMIN endpoint
   // ───────────────────────────────────────────────────────────────────────────
-  describe('AC-13: RBAC — ADMIN → POST /catalog/products → not 401/403', () => {
+  describe('AC-13: RBAC — ADMIN → POST /admin/catalog/products → not 401/403', () => {
     it('an ADMIN token passes JWT + RBAC guards (may fail for other business reasons but not auth)', async () => {
       // Promote a user to ADMIN directly in DB to simulate an admin user
       const { email, password } = await registerUser(app, 'admin@example.com');
@@ -705,13 +705,92 @@ describe('Auth (e2e)', () => {
       const tokens = await loginUser(app, email, password);
 
       const res = await request(app.getHttpServer())
-        .post(`${API}/catalog/products`)
+        .post(`${API}/admin/catalog/products`)
         .set('Authorization', `Bearer ${tokens.accessToken}`)
         .send({ name: 'Admin Product', categoryId: 'non-existent', skus: [] });
 
       // Must NOT be 401 or 403 — auth passed. Business error (404 category) is acceptable.
       expect(res.status).not.toBe(401);
       expect(res.status).not.toBe(403);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Catalog AC-15: every endpoint under /admin/catalog refuses non-admins
+  // (spec: catalog; lives here because the catalog e2e suite switches the guards off)
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('Catalog AC-15: /admin/catalog needs an ADMIN token', () => {
+    const adminEndpoints = [
+      ['get', '/admin/catalog/products'],
+      ['get', '/admin/catalog/products/some-id'],
+      ['post', '/admin/catalog/products'],
+      ['patch', '/admin/catalog/products/some-id/publish'],
+      ['post', '/admin/catalog/categories'],
+      ['patch', '/admin/catalog/categories/some-id/move'],
+      ['delete', '/admin/catalog/categories/some-id'],
+    ] as const;
+
+    it.each(adminEndpoints)(
+      '%s %s without a token → 401',
+      async (method, path) => {
+        await request(app.getHttpServer())[method](`${API}${path}`).expect(401);
+      },
+    );
+
+    it.each(adminEndpoints)(
+      '%s %s with a CUSTOMER token → 403',
+      async (method, path) => {
+        const tokens = await registerAndLogin(app); // default role is CUSTOMER
+
+        await request(app.getHttpServer())
+          [method](`${API}${path}`)
+          .set('Authorization', authHeader(tokens))
+          .expect(403);
+      },
+    );
+
+    it('writes nothing and returns no product when a CUSTOMER tries', async () => {
+      const tokens = await registerAndLogin(app);
+      const productsBefore = await prisma.product.count();
+
+      await request(app.getHttpServer())
+        .post(`${API}/admin/catalog/products`)
+        .set('Authorization', authHeader(tokens))
+        .send({ name: 'Hack Product', categoryId: 'fake', skus: [] })
+        .expect(403);
+      const read = await request(app.getHttpServer())
+        .get(`${API}/admin/catalog/products`)
+        .set('Authorization', authHeader(tokens))
+        .expect(403);
+
+      expect(await prisma.product.count()).toBe(productsBefore);
+      expect(read.body.data).toBeUndefined();
+    });
+
+    it('lets an ADMIN read the admin product list', async () => {
+      const { email, password } = await registerUser(
+        app,
+        'catalog-admin@example.com',
+      );
+      await prisma.user.updateMany({
+        where: { credentials: { some: { identifier: email } } },
+        data: { role: 'ADMIN' },
+      });
+      const tokens = await loginUser(app, email, password);
+
+      await request(app.getHttpServer())
+        .get(`${API}/admin/catalog/products`)
+        .set('Authorization', authHeader(tokens))
+        .expect(200);
+    });
+
+    it('keeps the public catalog reads open without any token', async () => {
+      await request(app.getHttpServer())
+        .get(`${API}/catalog/products`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .get(`${API}/catalog/categories`)
+        .expect(200);
     });
   });
   // ═══════════════════════════════════════════════════════════════════════════

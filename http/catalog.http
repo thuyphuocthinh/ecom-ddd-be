@@ -2,9 +2,11 @@
 # Catalog (danh mục + sản phẩm) — test API bằng extension "REST Client" của
 # VS Code (humao.rest-client). Bấm "Send Request" ngay phía trên dòng GET/POST/...
 #
-# - Các request ĐỌC (GET) là công khai, không cần đăng nhập.
-# - Các request GHI cần tài khoản ADMIN. Tài khoản mới đăng ký mặc định là
-#   CUSTOMER → ghi sẽ bị 403. Cách nâng quyền (chạy một lần):
+# - Các request ĐỌC công khai (đường dẫn /catalog/...) không cần đăng nhập, và CHỈ
+#   thấy sản phẩm đã đăng bán (PUBLISHED). Sản phẩm nháp: công khai trả 404 / không liệt kê.
+# - Mọi request của ADMIN nằm dưới /admin/catalog/...: các request GHI, và hai request
+#   đọc để xem sản phẩm ở mọi trạng thái (bước 11b và 14b). Cần tài khoản ADMIN.
+#   Tài khoản mới đăng ký mặc định là CUSTOMER → bị 403. Cách nâng quyền (chạy một lần):
 #     1) Đăng ký tài khoản (bước 0 và 0b dưới đây, hoặc file auth.http). Mã xác thực
 #        được in ra log của server (không gửi email thật ở môi trường dev).
 #     2) Chạy SQL (thay <email>):
@@ -73,7 +75,7 @@ Content-Type: application/json
 
 ### 2. Tạo danh mục gốc (Idempotency-Key tuỳ chọn: gửi lại cùng key trong 24h → trả lại kết quả cũ, không tạo trùng)
 # @name createRootCategory
-POST {{baseUrl}}/catalog/categories
+POST {{baseUrl}}/admin/catalog/categories
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 Idempotency-Key: demo-root-category-001
@@ -85,7 +87,7 @@ Idempotency-Key: demo-root-category-001
 
 ### 3. Tạo danh mục con
 # @name createChildCategory
-POST {{baseUrl}}/catalog/categories
+POST {{baseUrl}}/admin/catalog/categories
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
@@ -108,7 +110,7 @@ GET {{baseUrl}}/catalog/categories/{{childCategoryId}}
 
 
 ### 7. Đổi tên danh mục
-PATCH {{baseUrl}}/catalog/categories/{{childCategoryId}}
+PATCH {{baseUrl}}/admin/catalog/categories/{{childCategoryId}}
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
@@ -118,7 +120,7 @@ Content-Type: application/json
 
 
 ### 8. Di chuyển danh mục sang cha khác (newParentId: null = đưa lên gốc)
-PATCH {{baseUrl}}/catalog/categories/{{childCategoryId}}/move
+PATCH {{baseUrl}}/admin/catalog/categories/{{childCategoryId}}/move
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
@@ -128,7 +130,7 @@ Content-Type: application/json
 
 
 ### 9. Xoá danh mục (chỉ xoá được khi không có danh mục con và không có sản phẩm)
-DELETE {{baseUrl}}/catalog/categories/{{childCategoryId}}
+DELETE {{baseUrl}}/admin/catalog/categories/{{childCategoryId}}
 Authorization: Bearer {{adminToken}}
 
 
@@ -138,7 +140,7 @@ Authorization: Bearer {{adminToken}}
 
 ### 10. Tạo sản phẩm kèm SKU (trạng thái ban đầu DRAFT; skuCode phải duy nhất nên có {{$timestamp}})
 # @name createProduct
-POST {{baseUrl}}/catalog/products
+POST {{baseUrl}}/admin/catalog/products
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 Idempotency-Key: demo-product-001
@@ -159,29 +161,42 @@ Idempotency-Key: demo-product-001
 }
 
 
-### 11. Danh sách sản phẩm (công khai, phân trang keyset bằng cursor)
+### 11. Danh sách sản phẩm đã đăng bán (công khai, phân trang keyset bằng cursor)
+# Sản phẩm vừa tạo ở bước 10 đang là DRAFT nên CHƯA có trong danh sách này: chạy bước 16 (đăng bán) rồi gọi lại.
+# Không nhận tham số `status`: gửi vào sẽ bị 400.
 # @name listProducts
 GET {{baseUrl}}/catalog/products?limit=10
+
+
+### 11b. Danh sách sản phẩm ở MỌI trạng thái (ADMIN). Thêm ?status=DRAFT để chỉ xem hàng nháp
+GET {{baseUrl}}/admin/catalog/products?limit=10
+Authorization: Bearer {{adminToken}}
 
 
 ### 12. Trang tiếp theo (dùng nextCursor của request 11)
 GET {{baseUrl}}/catalog/products?limit=10&cursor={{nextCursor}}
 
 
-### 13. Lọc: theo danh mục, trạng thái, khoảng giá, từ khoá (đổi/bỏ bớt tham số tuỳ ý)
+### 13. Lọc: theo danh mục, khoảng giá, từ khoá (đổi/bỏ bớt tham số tuỳ ý)
+# categoryId gồm cả sản phẩm của các danh mục con: thử với {{rootCategoryId}} sẽ thấy cả sản phẩm của "Áo thun".
 # Nếu trả 500 với log `column "searchVector" does not exist`: DB đang thiếu cột tìm kiếm
 # (từng bị `prisma db push` xoá). Khôi phục bằng cách chạy lại SQL trong
 # prisma/migrations/1_add_product_search_vector/migration.sql (có IF NOT EXISTS nên chạy lại an toàn).
 # Bỏ tham số `search` thì các bộ lọc còn lại vẫn chạy bình thường.
-GET {{baseUrl}}/catalog/products?categoryId={{childCategoryId}}&status=PUBLISHED&minPrice=100000&maxPrice=500000&search=%C3%A1o%20thun
+GET {{baseUrl}}/catalog/products?categoryId={{childCategoryId}}&minPrice=100000&maxPrice=500000&search=%C3%A1o%20thun
 
 
-### 14. Chi tiết sản phẩm (công khai)
+### 14. Chi tiết sản phẩm đã đăng bán (công khai). Sản phẩm DRAFT trả 404 (CAT-010) như id không tồn tại
 GET {{baseUrl}}/catalog/products/{{productId}}
 
 
+### 14b. Chi tiết sản phẩm ở mọi trạng thái (ADMIN)
+GET {{baseUrl}}/admin/catalog/products/{{productId}}
+Authorization: Bearer {{adminToken}}
+
+
 ### 15. Cập nhật thông tin sản phẩm
-PATCH {{baseUrl}}/catalog/products/{{productId}}
+PATCH {{baseUrl}}/admin/catalog/products/{{productId}}
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
@@ -192,12 +207,12 @@ Content-Type: application/json
 
 
 ### 16. Đăng bán (DRAFT → PUBLISHED; cần có ít nhất một SKU giá > 0, nếu không → 400)
-PATCH {{baseUrl}}/catalog/products/{{productId}}/publish
+PATCH {{baseUrl}}/admin/catalog/products/{{productId}}/publish
 Authorization: Bearer {{adminToken}}
 
 
 ### 17. Ẩn sản phẩm (PUBLISHED → DRAFT)
-PATCH {{baseUrl}}/catalog/products/{{productId}}/unpublish
+PATCH {{baseUrl}}/admin/catalog/products/{{productId}}/unpublish
 Authorization: Bearer {{adminToken}}
 
 
@@ -207,7 +222,7 @@ Authorization: Bearer {{adminToken}}
 
 ### 18. Thêm một SKU vào sản phẩm (trùng thuộc tính với SKU có sẵn → 409)
 # @name addSku
-POST {{baseUrl}}/catalog/products/{{productId}}/skus
+POST {{baseUrl}}/admin/catalog/products/{{productId}}/skus
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
@@ -219,7 +234,7 @@ Content-Type: application/json
 
 
 ### 19. Đổi giá một SKU
-PATCH {{baseUrl}}/catalog/products/{{productId}}/skus/{{skuId}}/price
+PATCH {{baseUrl}}/admin/catalog/products/{{productId}}/skus/{{skuId}}/price
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
@@ -229,5 +244,5 @@ Content-Type: application/json
 
 
 ### 20. Xoá một SKU
-DELETE {{baseUrl}}/catalog/products/{{productId}}/skus/{{newSkuId}}
+DELETE {{baseUrl}}/admin/catalog/products/{{productId}}/skus/{{newSkuId}}
 Authorization: Bearer {{adminToken}}

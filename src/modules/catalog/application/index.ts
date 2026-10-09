@@ -7,6 +7,8 @@ export * from './queries/get-products.query.js';
 export * from './queries/get-products.handler.js';
 export * from './queries/get-product-by-id.query.js';
 export * from './queries/get-product-by-id.handler.js';
+export * from './queries/get-published-product-by-id.query.js';
+export * from './queries/get-published-product-by-id.handler.js';
 export * from './queries/get-categories.query.js';
 export * from './queries/get-categories.handler.js';
 

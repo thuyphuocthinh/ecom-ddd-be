@@ -6,7 +6,9 @@ import { ProductStatus } from '../entities/product.entity.js';
 export interface FindProductsParams {
   limit: number;
   cursor?: string;
-  categoryId?: string;
+  // Path of the chosen category (e.g. `/10/`): matches the products of that
+  // category and of every category below it.
+  categoryPath?: string;
   search?: string;
   status?: ProductStatus;
   minPrice?: number;

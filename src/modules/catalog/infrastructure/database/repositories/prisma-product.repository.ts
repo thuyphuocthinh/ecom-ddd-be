@@ -131,22 +131,27 @@ export class PrismaProductRepository implements IProductRepository {
   async findList(
     params: FindProductsParams,
   ): Promise<PaginatedResult<Product>> {
-    const { limit, cursor, categoryId, search, status, minPrice, maxPrice } =
+    const { limit, cursor, categoryPath, search, status, minPrice, maxPrice } =
       params;
     this.logger.debug(
-      `Finding product list (limit: ${limit}, cursor: ${cursor}, search: ${search}, categoryId: ${categoryId})`,
+      `Finding product list (limit: ${limit}, cursor: ${cursor}, search: ${search}, categoryPath: ${categoryPath})`,
     );
     const take = limit + 1; // Limit + 1 trick
 
     const where: Prisma.ProductWhereInput = {};
 
-    if (categoryId) {
-      where.categoryId = categoryId;
+    if (categoryPath) {
+      // Every category path ends with `/`, so `/10/` matches `/10/20/` but not
+      // `/100/`: the product's category is the chosen one or lies below it.
+      // `startsWith` becomes `LIKE 'path%'` without escaping `_` or `%`; that is
+      // safe because category ids are server-made Snowflake numbers, so a path
+      // only ever holds digits and `/`.
+      where.category = { path: { startsWith: categoryPath } };
     }
 
     if (search) {
       // Full-text match against the generated `searchVector` column + GIN
-      // index (prisma/sql/add_product_search_vector.sql) instead of
+      // index (prisma/migrations/1_add_product_search_vector) instead of
       // `contains`/ILIKE, which can't use an index and doesn't scale past
       // a small catalog. Prisma can't express this column, so the set of
       // matching ids is fetched via raw SQL and intersected with the rest

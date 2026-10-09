@@ -113,7 +113,7 @@ describe('PrismaProductRepository (Integration)', () => {
     // Find without cursor
     const result1 = await productRepo.findList({
       limit: 2,
-      categoryId: 'cat_phone',
+      categoryPath: category.path,
     });
     expect(result1.data).toHaveLength(2);
     expect(result1.data.map((p) => p.id)).toEqual(['prod_13', 'prod_14']);
@@ -124,12 +124,161 @@ describe('PrismaProductRepository (Integration)', () => {
     const result2 = await productRepo.findList({
       cursor: 'prod_14',
       limit: 2,
-      categoryId: 'cat_phone',
+      categoryPath: category.path,
     });
     expect(result2.data).toHaveLength(1);
     expect(result2.data[0].id).toBe('prod_15');
     expect(result2.meta.hasMore).toBe(false);
     expect(result2.meta.nextCursor).toBe(null);
+  });
+
+  describe('filtering by category path (the chosen category and everything below it)', () => {
+    const saveCategory = async (id: string, parent: Category | null) => {
+      const category = Category.create(`Category ${id}`, parent, id);
+      await categoryRepo.save(category);
+      return category;
+    };
+
+    const saveProduct = async (
+      id: string,
+      categoryId: string,
+      options: { name?: string; price?: number } = {},
+    ) => {
+      const product = Product.create(
+        { categoryId, name: options.name ?? `Product ${id}` },
+        id,
+      );
+      if (options.price !== undefined) {
+        product.addSku({
+          price: Price.create(options.price),
+          attributes: SkuAttributes.create({}),
+          skuCode: `SKU-${id}`,
+        });
+      }
+      await productRepo.save(product);
+    };
+
+    const idsOf = (result: { data: Product[] }) =>
+      result.data.map((p) => p.id).sort();
+
+    it('includes the products of every descendant (AC-16)', async () => {
+      const electronics = await saveCategory('ele', null);
+      const phones = await saveCategory('pho', electronics);
+      const iphones = await saveCategory('iph', phones);
+      const laptops = await saveCategory('lap', electronics);
+      const fashion = await saveCategory('fas', null);
+      await saveProduct('prod_in_electronics', electronics.id);
+      await saveProduct('prod_in_phones', phones.id);
+      await saveProduct('prod_in_iphones', iphones.id);
+      await saveProduct('prod_in_laptops', laptops.id);
+      await saveProduct('prod_in_fashion', fashion.id);
+
+      const underElectronics = await productRepo.findList({
+        limit: 20,
+        categoryPath: electronics.path,
+      });
+      expect(idsOf(underElectronics)).toEqual([
+        'prod_in_electronics',
+        'prod_in_iphones',
+        'prod_in_laptops',
+        'prod_in_phones',
+      ]);
+
+      const underPhones = await productRepo.findList({
+        limit: 20,
+        categoryPath: phones.path,
+      });
+      expect(idsOf(underPhones)).toEqual(['prod_in_iphones', 'prod_in_phones']);
+
+      const underFashion = await productRepo.findList({
+        limit: 20,
+        categoryPath: fashion.path,
+      });
+      expect(idsOf(underFashion)).toEqual(['prod_in_fashion']);
+    });
+
+    it('does not mix up categories whose ids start the same (AC-17)', async () => {
+      const ten = await saveCategory('10', null);
+      const hundred = await saveCategory('100', null);
+      await saveProduct('prod_ten', ten.id);
+      await saveProduct('prod_hundred', hundred.id);
+
+      const result = await productRepo.findList({
+        limit: 20,
+        categoryPath: ten.path,
+      });
+
+      expect(idsOf(result)).toEqual(['prod_ten']);
+    });
+
+    it('combines with price, search and keyset pagination without repeating or skipping a product (AC-18)', async () => {
+      const parent = await saveCategory('par', null);
+      const childOne = await saveCategory('ch1', parent);
+      const childTwo = await saveCategory('ch2', parent);
+      const other = await saveCategory('oth', null);
+      await saveProduct('prod_a1', parent.id, {
+        name: 'alpha phone',
+        price: 100,
+      });
+      await saveProduct('prod_a2', childOne.id, {
+        name: 'beta phone',
+        price: 200,
+      });
+      await saveProduct('prod_a3', childOne.id, {
+        name: 'gamma laptop',
+        price: 300,
+      });
+      await saveProduct('prod_a4', childTwo.id, {
+        name: 'delta phone',
+        price: 400,
+      });
+      await saveProduct('prod_a5', childTwo.id, {
+        name: 'epsilon laptop',
+        price: 500,
+      });
+      await saveProduct('prod_other', other.id, {
+        name: 'zeta phone',
+        price: 250,
+      });
+
+      // Walk the whole branch two products at a time
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const page = await productRepo.findList({
+          limit: 2,
+          cursor,
+          categoryPath: parent.path,
+        });
+        seen.push(...page.data.map((p) => p.id));
+        cursor = page.meta.nextCursor ?? undefined;
+        pages++;
+      } while (cursor);
+      expect(seen).toEqual([
+        'prod_a1',
+        'prod_a2',
+        'prod_a3',
+        'prod_a4',
+        'prod_a5',
+      ]);
+      expect(pages).toBe(3);
+
+      const byPrice = await productRepo.findList({
+        limit: 20,
+        categoryPath: parent.path,
+        minPrice: 200,
+        maxPrice: 400,
+      });
+      expect(idsOf(byPrice)).toEqual(['prod_a2', 'prod_a3', 'prod_a4']);
+
+      const bySearch = await productRepo.findList({
+        limit: 20,
+        categoryPath: childOne.path,
+        search: 'phone',
+      });
+      expect(idsOf(bySearch)).toEqual(['prod_a2']);
+    });
   });
 
   it('should full-text search products by name/description via the generated tsvector column', async () => {
