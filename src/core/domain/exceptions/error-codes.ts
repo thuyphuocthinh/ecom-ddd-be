@@ -196,6 +196,29 @@ export const LocationErrorCodes = {
   },
 };
 
+export const AddressErrorCodes = {
+  DOMAIN_EXCEPTION: {
+    code: 'ADDR-000',
+    message: 'Address domain exception',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  ADDRESS_NOT_FOUND: {
+    code: 'ADDR-001',
+    message: 'Address not found',
+    status: HttpStatus.NOT_FOUND,
+  },
+  ADDRESS_LIMIT_REACHED: {
+    code: 'ADDR-002',
+    message: 'You can keep at most 10 addresses',
+    status: HttpStatus.CONFLICT,
+  },
+  INVALID_ADDRESS: {
+    code: 'ADDR-003',
+    message: 'The address is not valid',
+    status: HttpStatus.BAD_REQUEST,
+  },
+};
+
 export const UserErrorCodes = {
   DOMAIN_EXCEPTION: {
     code: 'USR-000',

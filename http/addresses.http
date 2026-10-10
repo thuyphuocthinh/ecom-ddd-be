@@ -1,0 +1,144 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sổ địa chỉ giao hàng (user-addresses) — test API bằng extension "REST Client" của VS Code
+# (humao.rest-client). Bấm "Send Request" ngay phía trên dòng GET/POST/PATCH/PUT/DELETE.
+#
+# - Cần một tài khoản đã đăng ký (xem http/auth.http). Request 1 đăng nhập để lấy token.
+# - Cần đã nạp danh mục hành chính (một lần):
+#     docker exec -i ecom_postgres psql -U root -d ecom_db < scripts/seed-administrative-units.sql
+#   Người dùng chọn tỉnh rồi chọn phường/xã (request 2, 3); chỉ gửi MÃ PHƯỜNG/XÃ (wardCode),
+#   tỉnh được suy ra từ phường/xã, không gửi tỉnh.
+# - Chỉ làm việc với địa chỉ của chính mình. Tối đa 10 địa chỉ; đúng một địa chỉ mặc định
+#   (địa chỉ đầu tiên tự là mặc định). Địa chỉ của người khác hoặc mã không có → 404 ADDR-001.
+# - Giới hạn: mỗi request ghi (POST, PATCH, PUT, DELETE) 30 lần/15 phút/user (mỗi loại tính riêng).
+#
+# Chạy từ trên xuống: id địa chỉ được lấy tự động từ response.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@email = thuyphuocthinhtpt+1@gmail.com
+@password = 123456Aa
+
+# Lấy tự động từ response (không cần sửa)
+@accessToken = {{login.response.body.$.data.accessToken}}
+@wardCode = {{wards.response.body.$.data[0].code}}
+@addressId = {{addFirst.response.body.$.data.id}}
+@secondId = {{addSecond.response.body.$.data.id}}
+
+
+### 1. Đăng nhập để lấy token (5 lần/15 phút/IP)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+
+### 2. Chọn tỉnh/thành: danh sách 34 tỉnh (công khai, không cần token). 01 = Thành phố Hà Nội
+GET {{baseUrl}}/locations/provinces
+
+
+### 3. Chọn phường/xã của tỉnh 01 (lấy phường/xã đầu tiên làm wardCode cho các request dưới)
+# @name wards
+GET {{baseUrl}}/locations/provinces/01/wards
+
+
+### 4. Thêm địa chỉ đầu tiên: tự thành mặc định. Số điện thoại: 10 số bắt đầu bằng 0 (+84 và dấu ngăn cách được chấp nhận)
+# @name addFirst
+POST {{baseUrl}}/users/me/addresses
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "recipientName": "Nguyễn Văn A",
+  "phone": "+84 912.345.678",
+  "wardCode": "{{wardCode}}",
+  "street": "12 Bạch Đằng",
+  "label": "Nhà"
+}
+
+
+### 5. Thêm địa chỉ thứ hai và đặt làm mặc định ngay (địa chỉ mặc định cũ tự bỏ cờ mặc định)
+# @name addSecond
+POST {{baseUrl}}/users/me/addresses
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "recipientName": "Nguyễn Văn A",
+  "phone": "0987654321",
+  "wardCode": "{{wardCode}}",
+  "street": "5 Lê Duẩn",
+  "label": "Công ty",
+  "isDefault": true
+}
+
+
+### 6. Xem sổ địa chỉ của mình (mặc định đứng đầu, sau đó mới nhất trước)
+GET {{baseUrl}}/users/me/addresses
+Authorization: Bearer {{accessToken}}
+
+
+### 7. Sửa một phần (chỉ các trường gửi lên bị đổi; label null thì xóa nhãn; đổi wardCode thì tỉnh đổi theo)
+PATCH {{baseUrl}}/users/me/addresses/{{addressId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "street": "20 Trần Phú",
+  "label": null
+}
+
+
+### 8. Đặt địa chỉ đầu tiên làm mặc định (đúng một địa chỉ mặc định)
+PUT {{baseUrl}}/users/me/addresses/{{addressId}}/default
+Authorization: Bearer {{accessToken}}
+
+
+### 9. Dữ liệu sai: số điện thoại ngắn → 400 ADDR-003, errors.field = "phone"
+POST {{baseUrl}}/users/me/addresses
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "recipientName": "Nguyễn Văn A",
+  "phone": "12345",
+  "wardCode": "{{wardCode}}",
+  "street": "12 Bạch Đằng"
+}
+
+
+### 10. Mã phường/xã không có → 400 ADDR-003, errors.reason = "WARD_NOT_FOUND"
+POST {{baseUrl}}/users/me/addresses
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "recipientName": "Nguyễn Văn A",
+  "phone": "0912345678",
+  "wardCode": "99999",
+  "street": "12 Bạch Đằng"
+}
+
+
+### 11. Không được gửi tỉnh hay cờ mặc định khi sửa: trường lạ → 400
+PATCH {{baseUrl}}/users/me/addresses/{{addressId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "provinceCode": "48",
+  "isDefault": true
+}
+
+
+### 12. Xóa địa chỉ (204). Nếu là địa chỉ mặc định thì địa chỉ mới tạo gần nhất còn lại thành mặc định
+DELETE {{baseUrl}}/users/me/addresses/{{secondId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 13. Địa chỉ của người khác hoặc mã không có → 404 ADDR-001 (cùng một câu trả lời cho cả hai)
+DELETE {{baseUrl}}/users/me/addresses/khong-co-dia-chi-nay
+Authorization: Bearer {{accessToken}}

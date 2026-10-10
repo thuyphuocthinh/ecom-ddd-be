@@ -3,3 +3,8 @@ export * from './repositories/user.repository.js';
 export * from './exceptions/user.exception.js';
 export * from './services/display-name.js';
 export * from './services/avatar.js';
+export * from './entities/address.entity.js';
+export * from './repositories/address.repository.js';
+export * from './exceptions/address.exception.js';
+export * from './services/phone.js';
+export * from './services/clean-text.js';

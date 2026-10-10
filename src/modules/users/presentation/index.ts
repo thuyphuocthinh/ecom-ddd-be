@@ -2,3 +2,8 @@ export * from './dtos/user-response.dto.js';
 export * from './mappers/user.mapper.js';
 export * from './controllers/user.controller.js';
 export * from './dtos/update-profile.dto.js';
+export * from './controllers/address.controller.js';
+export * from './dtos/create-address.dto.js';
+export * from './dtos/update-address.dto.js';
+export * from './dtos/address-response.dto.js';
+export * from './mappers/address.mapper.js';

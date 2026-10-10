@@ -148,6 +148,36 @@ model User {
 
   credentials UserCredential[]
   sessions    Session[]
+  addresses   Address[]
+}
+
+// A delivery address in a user's address book. At most 10 per user, and at most one with
+// isDefault = true; both are kept by the code under a pessimistic lock on the User row, and the
+// second one is also enforced by a partial unique index ("Address_userId_default_key" ON ("userId")
+// WHERE "isDefault" = true), hand-written in the migration because Prisma cannot express it.
+// The user picks a ward from the administrative units; the province follows from the ward. The names
+// are copies taken when the address was saved ("Thành phố Hà Nội", "Phường Ba Đình"), so the address
+// still reads the same if the units are renamed later.
+model Address {
+  id            String   @id
+  userId        String
+  recipientName String   @db.VarChar(100)
+  phone         String   @db.VarChar(20)
+  provinceCode  String   @db.VarChar(2)
+  provinceName  String   @db.VarChar(100)
+  wardCode      String   @db.VarChar(5)
+  wardName      String   @db.VarChar(100)
+  street        String   @db.VarChar(255)
+  label         String?  @db.VarChar(50)
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  province Province @relation(fields: [provinceCode], references: [code], onDelete: Restrict)
+  ward     Ward     @relation(fields: [wardCode], references: [code], onDelete: Restrict)
+
+  @@index([userId])
 }
 
 enum SessionRevokeReason {
@@ -241,7 +271,8 @@ model Province {
   name String       @db.VarChar(100)
   type ProvinceType
 
-  wards Ward[]
+  wards     Ward[]
+  addresses Address[]
 }
 
 model Ward {
@@ -250,7 +281,8 @@ model Ward {
   name         String   @db.VarChar(100)
   type         WardType
 
-  province Province @relation(fields: [provinceCode], references: [code], onDelete: Restrict)
+  province  Province  @relation(fields: [provinceCode], references: [code], onDelete: Restrict)
+  addresses Address[]
 
   @@index([provinceCode])
 }
