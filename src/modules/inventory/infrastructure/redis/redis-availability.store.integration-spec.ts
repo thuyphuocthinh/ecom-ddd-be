@@ -257,24 +257,26 @@ describe('RedisAvailabilityStore (Integration)', () => {
     it('lists only records older than the given age, by the Redis clock, oldest first', async () => {
       await setStock({ A: 9 });
       await store.hold('OLD', 'fp', [{ skuId: 'A', qty: 1 }]);
-      await sleep(60);
+      // The gaps are wide because the Redis clock does not tick exactly like this process's, and a
+      // busy machine can pause a test for a while
+      await sleep(1000);
       await store.hold('NEW', 'fp', [{ skuId: 'A', qty: 1 }]);
 
-      expect(await store.listStaleInflight(30, 10)).toEqual(['OLD']);
+      expect(await store.listStaleInflight(500, 10)).toEqual(['OLD']);
       expect(await store.listStaleInflight(60_000, 10)).toEqual([]);
-      await sleep(40);
-      expect(await store.listStaleInflight(30, 10)).toEqual(['OLD', 'NEW']);
+      await sleep(700);
+      expect(await store.listStaleInflight(500, 10)).toEqual(['OLD', 'NEW']);
     });
 
     it('stops at the limit', async () => {
       await setStock({ A: 9 });
       for (const id of ['O1', 'O2', 'O3']) {
         await store.hold(id, 'fp', [{ skuId: 'A', qty: 1 }]);
-        await sleep(5);
+        await sleep(30);
       }
-      await sleep(20);
+      await sleep(150);
 
-      expect(await store.listStaleInflight(10, 2)).toEqual(['O1', 'O2']);
+      expect(await store.listStaleInflight(50, 2)).toEqual(['O1', 'O2']);
     });
   });
 
