@@ -53,6 +53,8 @@ describe('CatalogController (e2e)', () => {
   });
 
   beforeEach(async () => {
+    // Reservations point at SKUs with ON DELETE RESTRICT: they must go first
+    await prismaService.reservation.deleteMany();
     await prismaService.product.deleteMany();
     await prismaService.category.deleteMany();
   });
@@ -543,6 +545,50 @@ describe('CatalogController (e2e)', () => {
       await request(app.getHttpServer())
         .get(`${PUBLIC}/categories`)
         .expect(200);
+    });
+  });
+
+  // ── AC-22: a SKU inventory has held cannot be removed ──────────────────────
+
+  describe('AC-22: removing a SKU that was held for an order', () => {
+    it('answers 409 CAT-016 and keeps the SKU, while a SKU that was never held can still be removed', async () => {
+      const categoryId = await createCategory('Phones');
+      const productId = await createProduct(categoryId, 'Phone', {
+        price: 100,
+      });
+      const added = await request(app.getHttpServer())
+        .post(`${ADMIN}/products/${productId}/skus`)
+        .send({
+          skuCode: `FREE-${Date.now()}`,
+          price: 120,
+          attributes: { c: 'x' },
+        })
+        .expect(201);
+      const heldSku = (
+        await prismaService.sku.findFirstOrThrow({
+          where: { productId, id: { not: added.body.data.id } },
+        })
+      ).id;
+      await prismaService.reservation.create({
+        data: {
+          id: 'res_e2e',
+          orderId: 'order_e2e',
+          skuId: heldSku,
+          qty: 1,
+          status: 'RESERVED',
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+
+      const refused = await request(app.getHttpServer())
+        .delete(`${ADMIN}/products/${productId}/skus/${heldSku}`)
+        .expect(409);
+      expect(refused.body.code).toBe('CAT-016');
+      expect(await prismaService.sku.count({ where: { id: heldSku } })).toBe(1);
+
+      await request(app.getHttpServer())
+        .delete(`${ADMIN}/products/${productId}/skus/${added.body.data.id}`)
+        .expect(204);
     });
   });
 

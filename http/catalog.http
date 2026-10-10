@@ -179,9 +179,8 @@ GET {{baseUrl}}/catalog/products?limit=10&cursor={{nextCursor}}
 
 ### 13. Lọc: theo danh mục, khoảng giá, từ khoá (đổi/bỏ bớt tham số tuỳ ý)
 # categoryId gồm cả sản phẩm của các danh mục con: thử với {{rootCategoryId}} sẽ thấy cả sản phẩm của "Áo thun".
-# Nếu trả 500 với log `column "searchVector" does not exist`: DB đang thiếu cột tìm kiếm
-# (từng bị `prisma db push` xoá). Khôi phục bằng cách chạy lại SQL trong
-# prisma/migrations/1_add_product_search_vector/migration.sql (có IF NOT EXISTS nên chạy lại an toàn).
+# Nếu trả 500 với log `column "searchVector" does not exist`: DB được dựng không đúng cách (ví dụ bằng
+# `prisma db push`, không tạo cột này). Dựng lại DB từ migration: `npx prisma migrate reset --force`.
 # Bỏ tham số `search` thì các bộ lọc còn lại vẫn chạy bình thường.
 GET {{baseUrl}}/catalog/products?categoryId={{childCategoryId}}&minPrice=100000&maxPrice=500000&search=%C3%A1o%20thun
 

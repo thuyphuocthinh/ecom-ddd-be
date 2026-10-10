@@ -310,6 +310,53 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('Inventory settings', () => {
+    it('are optional: the defaults apply when none is set', () => {
+      expect(() => validateEnv({ ...VALID })).not.toThrow();
+    });
+
+    it('accepts whole numbers (env values are strings)', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          RESERVATION_TTL_MINUTES: '15',
+          INVENTORY_INFLIGHT_GRACE_SECONDS: '120',
+          INVENTORY_MAINTENANCE_INTERVAL_SECONDS: '60',
+        }),
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['RESERVATION_TTL_MINUTES', '0'],
+      ['RESERVATION_TTL_MINUTES', '-5'],
+      ['RESERVATION_TTL_MINUTES', '1.5'],
+      ['RESERVATION_TTL_MINUTES', 'fifteen'],
+      // 7 days is the longest a delayed job can wait
+      ['RESERVATION_TTL_MINUTES', '10081'],
+      ['INVENTORY_INFLIGHT_GRACE_SECONDS', '0'],
+      ['INVENTORY_MAINTENANCE_INTERVAL_SECONDS', '-1'],
+    ])('rejects %s=%s', (name, value) => {
+      expect(() => validateEnv({ ...VALID, [name]: value })).toThrow(
+        new RegExp(name),
+      );
+    });
+
+    it('accepts a hold time of exactly 7 days', () => {
+      expect(() =>
+        validateEnv({ ...VALID, RESERVATION_TTL_MINUTES: '10080' }),
+      ).not.toThrow();
+    });
+
+    it('lets the maintenance interval be 0, which switches the periodic sweep off', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          INVENTORY_MAINTENANCE_INTERVAL_SECONDS: '0',
+        }),
+      ).not.toThrow();
+    });
+  });
+
   describe('Cloudinary (profile pictures)', () => {
     const ALL = {
       ...VALID,

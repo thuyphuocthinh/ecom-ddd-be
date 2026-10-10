@@ -13,6 +13,14 @@ export interface JobDefinition<T = unknown> {
   readonly retryDelaysMs: readonly number[];
   /** How many jobs of this kind run at the same time. Default 1. */
   readonly concurrency?: number;
+  /**
+   * How long to hold a job back before its FIRST run, in milliseconds (a whole number from 1
+   * up to 7 days). Without it the job runs as soon as a worker is free. One delay per kind of
+   * job, not per message: the delay is a queue with a fixed expiry, so a message with a long
+   * delay in front would hold back the shorter ones behind it. It does not add to the retry
+   * delays: a retry waits only its own `retryDelaysMs` entry.
+   */
+  readonly delayMs?: number;
   /** Type-only marker so `enqueue` and `register` agree on the payload type. Never set. */
   readonly __payload?: T;
 }

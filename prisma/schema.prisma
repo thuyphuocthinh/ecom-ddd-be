@@ -35,17 +35,17 @@ enum CredentialProvider {
 }
 
 model Category {
-  id        String     @id
+  id        String   @id
   parentId  String?
-  name      String     @db.VarChar(255)
-  path      String     @unique @db.VarChar(500)
-  isActive  Boolean    @default(true)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  
-  parent    Category?  @relation("CategoryToCategory", fields: [parentId], references: [id])
-  children  Category[] @relation("CategoryToCategory")
-  products  Product[]
+  name      String   @db.VarChar(255)
+  path      String   @unique @db.VarChar(500)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   Category?  @relation("CategoryToCategory", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryToCategory")
+  products Product[]
 
   @@index([path])
 }
@@ -61,18 +61,22 @@ model Product {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  category    Category      @relation(fields: [categoryId], references: [id])
-  skus        Sku[]
+  // Full-text search column. In the database it is a GENERATED column
+  // (to_tsvector('simple', name || ' ' || description), 'simple' config) with a GIN index. Prisma's
+  // schema language cannot express "generated", so the migration writes that part by hand. The
+  // column is declared here, as Unsupported, only so that Prisma knows it exists: a column that is
+  // missing from this file makes the next `migrate dev` generate a DROP COLUMN for it. Prisma never
+  // writes it; only $queryRaw in PrismaProductRepository.findList() reads it. The dbgenerated(...) is
+  // how Postgres reports a generated column's expression, written exactly as Postgres reports it so
+  // that Prisma sees no difference between this file and the database.
+  searchVector Unsupported("tsvector")? @default(dbgenerated("to_tsvector('simple'::regconfig, (((COALESCE(name, ''::character varying))::text || ' '::text) || COALESCE(description, ''::text)))"))
+
+  category Category @relation(fields: [categoryId], references: [id])
+  skus     Sku[]
 
   @@index([categoryId, status])
+  @@index([searchVector], type: Gin)
 }
-
-// Note: the Product table also has a generated `searchVector` tsvector
-// column (name || description, 'simple' config) with a GIN index, added by
-// the hand-written migration prisma/migrations/1_add_product_search_vector
-// rather than declared here — Prisma's schema DSL can't express a
-// generated column. It's queried only via $queryRaw in
-// PrismaProductRepository.findList().
 
 model Sku {
   id         String   @id
@@ -84,19 +88,63 @@ model Sku {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product      Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stock        SkuStock?
+  reservations Reservation[]
 
   @@index([productId])
 }
 
+// ReservationStatus: RESERVED = held for an unpaid order, CONFIRMED = paid (stock taken out of
+// SkuStock.onHand), RELEASED = cancelled or expired (stock given back). CONFIRMED and RELEASED are final.
+enum ReservationStatus {
+  RESERVED
+  CONFIRMED
+  RELEASED
+}
+
+// How many units of a SKU are physically in the warehouse. What can be sold right now is
+// `onHand - sum(qty of RESERVED reservations)`; that number lives only in Redis and is rebuilt from here.
+// The hand-written migration adds CHECK ("onHand" >= 0), which Prisma's DSL cannot express.
+model SkuStock {
+  skuId     String   @id
+  onHand    Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Stock means nothing without its SKU, so it goes away with it
+  sku Sku @relation(fields: [skuId], references: [id], onDelete: Cascade)
+}
+
+// One row per (order, SKU): who holds how many units, until when. The durable record behind the
+// Redis counters. The hand-written migration adds CHECK (qty > 0).
+model Reservation {
+  id        String            @id
+  orderId   String            @db.VarChar(100) // plain text: there is no order table yet
+  skuId     String
+  qty       Int
+  status    ReservationStatus @default(RESERVED)
+  expiresAt DateTime
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  // A SKU that was ever reserved cannot be deleted (RESTRICT): unpublish the product instead
+  sku Sku @relation(fields: [skuId], references: [id], onDelete: Restrict)
+
+  // One order holds a SKU at most once; also what stops a retried order from holding twice
+  @@unique([orderId, skuId])
+  @@index([status, expiresAt])
+  @@index([skuId, status])
+}
+
 model User {
-  id          String           @id
-  displayName String?          @db.VarChar(255)
-  avatarUrl   String?          @db.VarChar(500)
-  role        UserRole         @default(CUSTOMER)
-  status      UserStatus       @default(ACTIVE)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id          String     @id
+  displayName String?    @db.VarChar(255)
+  avatarUrl   String?    @db.VarChar(500)
+  role        UserRole   @default(CUSTOMER)
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   credentials UserCredential[]
   sessions    Session[]

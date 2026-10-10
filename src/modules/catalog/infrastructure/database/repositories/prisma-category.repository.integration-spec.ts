@@ -26,6 +26,8 @@ describe('PrismaCategoryRepository (Integration)', () => {
 
   beforeEach(async () => {
     // Dọn dẹp dữ liệu trước mỗi test
+    // Reservations point at SKUs with ON DELETE RESTRICT: they must go first
+    await prismaService.reservation.deleteMany();
     await prismaService.sku.deleteMany();
     await prismaService.product.deleteMany();
     await prismaService.category.deleteMany();

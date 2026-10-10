@@ -62,8 +62,11 @@ jobs:
     - name: Generate Prisma Client
       run: npx prisma generate
 
-    - name: Push Prisma Schema
-      run: npx prisma db push --accept-data-loss
+    # Migrations, not `db push`: the full-text search column (Product.searchVector) and the inventory
+    # CHECK constraints exist only in the hand-written parts of the migration SQL, and `db push`
+    # would not create them
+    - name: Apply Prisma migrations
+      run: npx prisma migrate deploy
 
     - name: Run Unit & Integration Tests
       run: pnpm test

@@ -36,6 +36,8 @@ describe('PrismaProductRepository (Integration)', () => {
 
   beforeEach(async () => {
     // Clean up data
+    // Reservations point at SKUs with ON DELETE RESTRICT: they must go first
+    await prismaService.reservation.deleteMany();
     await prismaService.sku.deleteMany();
     await prismaService.product.deleteMany();
     await prismaService.category.deleteMany();
@@ -361,6 +363,84 @@ describe('PrismaProductRepository (Integration)', () => {
     const skuCodes = final?.getProps().skus.map((s) => s.getProps().skuCode);
     expect(skuCodes).toContain('SNK-40');
     expect(skuCodes).toContain('SNK-41');
+  });
+
+  describe('removing a SKU that inventory knows about (catalog AC-22)', () => {
+    const productWithTwoSkus = async () => {
+      await categoryRepo.save(Category.create('Shoes', null, 'cat_stock'));
+      const product = Product.create(
+        { categoryId: 'cat_stock', name: 'Sneaker' },
+        'prod_stock',
+      );
+      product.addSku(
+        {
+          price: Price.create(100),
+          attributes: SkuAttributes.create({ size: '40' }),
+          skuCode: 'STK-40',
+        },
+        'sku_held',
+      );
+      product.addSku(
+        {
+          price: Price.create(100),
+          attributes: SkuAttributes.create({ size: '41' }),
+          skuCode: 'STK-41',
+        },
+        'sku_free',
+      );
+      await productRepo.save(product);
+    };
+
+    const removeSku = async (skuId: string) => {
+      const loaded = await productRepo.findById('prod_stock');
+      loaded!.removeSku(skuId);
+      await productRepo.save(loaded!);
+    };
+
+    it.each(['RESERVED', 'CONFIRMED', 'RELEASED'] as const)(
+      'refuses with CAT-016 when a %s reservation points at the SKU, and keeps the SKU',
+      async (status) => {
+        await productWithTwoSkus();
+        await prismaService.reservation.create({
+          data: {
+            id: `res_${status}`,
+            orderId: 'order_1',
+            skuId: 'sku_held',
+            qty: 1,
+            status,
+            expiresAt: new Date(Date.now() + 60_000),
+          },
+        });
+
+        await expect(removeSku('sku_held')).rejects.toMatchObject({
+          code: CatalogErrorCodes.SKU_HAS_RESERVATIONS.code,
+        });
+
+        expect(
+          await prismaService.sku.count({ where: { id: 'sku_held' } }),
+        ).toBe(1);
+      },
+    );
+
+    it('still removes a SKU that was never held, and its stock row goes with it', async () => {
+      await productWithTwoSkus();
+      await prismaService.skuStock.create({
+        data: { skuId: 'sku_free', onHand: 5 },
+      });
+
+      await removeSku('sku_free');
+
+      expect(await prismaService.sku.count({ where: { id: 'sku_free' } })).toBe(
+        0,
+      );
+      expect(
+        await prismaService.skuStock.count({ where: { skuId: 'sku_free' } }),
+      ).toBe(0);
+      // The SKU that stayed is untouched
+      expect(await prismaService.sku.count({ where: { id: 'sku_held' } })).toBe(
+        1,
+      );
+    });
   });
 
   it('should cache findById and invalidate the cache on save', async () => {

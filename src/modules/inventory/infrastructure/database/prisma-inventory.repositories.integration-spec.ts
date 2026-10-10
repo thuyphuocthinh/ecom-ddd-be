@@ -1,0 +1,451 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { PrismaService } from '@/core/index.js';
+import {
+  Reservation,
+  ReservationAlreadyExistsError,
+  ReservationStatus,
+} from '../../domain/index.js';
+import { PrismaReservationRepository } from './prisma-reservation.repository.js';
+import { PrismaStockRepository } from './prisma-stock.repository.js';
+
+/** Against the real Postgres: the conditional updates, the constraints and the foreign keys. */
+describe('Inventory repositories (Integration)', () => {
+  let prisma: PrismaService;
+  let reservations: PrismaReservationRepository;
+  let stock: PrismaStockRepository;
+
+  const FUTURE = () => new Date(Date.now() + 15 * 60_000);
+  // Whether a hold has expired is judged by the DATABASE clock, which can differ from this
+  // machine's by a second or so (a container's clock drifts). A hold that "expired a second
+  // ago" by this clock may not have by the database's, so tests use a safe margin.
+  const EXPIRED_AGO = 10_000;
+
+  /** Two SKUs of one product, so reservations have something to point at. */
+  const seedCatalog = async () => {
+    await prisma.category.create({
+      data: { id: 'inv_cat', name: 'Inv', path: '/inv_cat/' },
+    });
+    await prisma.product.create({
+      data: { id: 'inv_prod', categoryId: 'inv_cat', name: 'Inv product' },
+    });
+    for (const id of ['A', 'B']) {
+      await prisma.sku.create({
+        data: {
+          id: `inv_sku_${id}`,
+          productId: 'inv_prod',
+          price: 10,
+          attributes: {},
+          skuCode: `INV-${id}`,
+        },
+      });
+    }
+  };
+
+  const reserve = async (
+    orderId: string,
+    items: { skuId: string; qty: number }[],
+    expiresAt = FUTURE(),
+  ) => {
+    const reservation = Reservation.restore({
+      orderId,
+      items,
+      status: ReservationStatus.RESERVED,
+      expiresAt,
+    });
+    await reservations.create(reservation);
+  };
+
+  const statusOf = async (orderId: string) =>
+    (await prisma.reservation.findMany({ where: { orderId } })).map(
+      (row) => row.status,
+    );
+
+  beforeAll(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PrismaService,
+        PrismaReservationRepository,
+        PrismaStockRepository,
+      ],
+    }).compile();
+    prisma = module.get(PrismaService);
+    reservations = module.get(PrismaReservationRepository);
+    stock = module.get(PrismaStockRepository);
+  });
+
+  beforeEach(async () => {
+    await prisma.reservation.deleteMany();
+    await prisma.skuStock.deleteMany();
+    await prisma.sku.deleteMany();
+    await prisma.product.deleteMany();
+    await prisma.category.deleteMany();
+    await seedCatalog();
+  });
+
+  afterAll(async () => {
+    await prisma.reservation.deleteMany();
+    await prisma.skuStock.deleteMany();
+    await prisma.sku.deleteMany();
+    await prisma.product.deleteMany();
+    await prisma.category.deleteMany();
+    await prisma.$disconnect();
+  });
+
+  describe('the database protects itself (AC-26)', () => {
+    it('refuses a negative on-hand', async () => {
+      await expect(
+        prisma.skuStock.create({ data: { skuId: 'inv_sku_A', onHand: -1 } }),
+      ).rejects.toThrow();
+    });
+
+    it('accepts an on-hand of 0', async () => {
+      await expect(
+        prisma.skuStock.create({ data: { skuId: 'inv_sku_A', onHand: 0 } }),
+      ).resolves.toBeDefined();
+    });
+
+    it.each([0, -3])('refuses a reservation of %s units', async (qty) => {
+      await expect(
+        prisma.reservation.create({
+          data: {
+            id: 'r1',
+            orderId: 'O1',
+            skuId: 'inv_sku_A',
+            qty,
+            expiresAt: FUTURE(),
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('refuses a second line for the same order and SKU', async () => {
+      await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }]);
+
+      await expect(
+        prisma.reservation.create({
+          data: {
+            id: 'dup',
+            orderId: 'O1',
+            skuId: 'inv_sku_A',
+            qty: 1,
+            expiresAt: FUTURE(),
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('refuses a SKU that does not exist, for stock and for a reservation', async () => {
+      await expect(
+        prisma.skuStock.create({ data: { skuId: 'no_such', onHand: 1 } }),
+      ).rejects.toThrow();
+      await expect(
+        reserve('O1', [{ skuId: 'no_such', qty: 1 }]),
+      ).rejects.toThrow();
+    });
+
+    it('deletes the stock row together with its SKU (CASCADE)', async () => {
+      await prisma.skuStock.create({ data: { skuId: 'inv_sku_A', onHand: 5 } });
+
+      await prisma.sku.delete({ where: { id: 'inv_sku_A' } });
+
+      expect(await prisma.skuStock.count()).toBe(0);
+    });
+
+    it.each(['RESERVED', 'CONFIRMED', 'RELEASED'] as const)(
+      'refuses to delete a SKU that has a %s reservation (RESTRICT)',
+      async (status) => {
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }]);
+        await prisma.reservation.updateMany({ data: { status } });
+
+        await expect(
+          prisma.sku.delete({ where: { id: 'inv_sku_A' } }),
+        ).rejects.toThrow();
+
+        expect(await prisma.sku.count({ where: { id: 'inv_sku_A' } })).toBe(1);
+      },
+    );
+  });
+
+  describe('PrismaReservationRepository', () => {
+    it('saves every line of an order and reads them back as one reservation', async () => {
+      const expiresAt = FUTURE();
+      await reserve(
+        'O1',
+        [
+          { skuId: 'inv_sku_B', qty: 1 },
+          { skuId: 'inv_sku_A', qty: 2 },
+        ],
+        expiresAt,
+      );
+
+      const found = await reservations.findByOrderId('O1');
+
+      expect(found?.orderId).toBe('O1');
+      expect(found?.status).toBe(ReservationStatus.RESERVED);
+      expect(found?.items).toEqual([
+        { skuId: 'inv_sku_A', qty: 2 },
+        { skuId: 'inv_sku_B', qty: 1 },
+      ]);
+      expect(found?.expiresAt.getTime()).toBe(expiresAt.getTime());
+    });
+
+    it('finds nothing for an order that holds nothing', async () => {
+      expect(await reservations.findByOrderId('nope')).toBeNull();
+      expect(await reservations.existsForOrder('nope')).toBe(false);
+    });
+
+    it('answers a clash with ReservationAlreadyExistsError and keeps the first lines (AC-8, AC-9)', async () => {
+      await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }]);
+
+      await expect(
+        reserve('O1', [
+          { skuId: 'inv_sku_A', qty: 5 },
+          { skuId: 'inv_sku_B', qty: 5 },
+        ]),
+      ).rejects.toBeInstanceOf(ReservationAlreadyExistsError);
+
+      // Neither line of the second attempt was written: one statement, all or nothing
+      expect((await reservations.findByOrderId('O1'))?.items).toEqual([
+        { skuId: 'inv_sku_A', qty: 1 },
+      ]);
+      expect(await reservations.existsForOrder('O1')).toBe(true);
+    });
+
+    describe('confirm (AC-11)', () => {
+      beforeEach(async () => {
+        await prisma.skuStock.createMany({
+          data: [
+            { skuId: 'inv_sku_A', onHand: 10 },
+            { skuId: 'inv_sku_B', onHand: 4 },
+          ],
+        });
+        await reserve('O1', [
+          { skuId: 'inv_sku_A', qty: 2 },
+          { skuId: 'inv_sku_B', qty: 1 },
+        ]);
+      });
+
+      const onHand = async (skuId: string) =>
+        (await prisma.skuStock.findUniqueOrThrow({ where: { skuId } })).onHand;
+
+      it('moves RESERVED to CONFIRMED and takes the units out of the warehouse, for every line', async () => {
+        expect(await reservations.confirm('O1')).toBe('CONFIRMED');
+
+        expect(await statusOf('O1')).toEqual(['CONFIRMED', 'CONFIRMED']);
+        expect(await onHand('inv_sku_A')).toBe(8);
+        expect(await onHand('inv_sku_B')).toBe(3);
+      });
+
+      it('does nothing the second time and takes the units out only once', async () => {
+        await reservations.confirm('O1');
+
+        expect(await reservations.confirm('O1')).toBe('ALREADY_CONFIRMED');
+
+        expect(await onHand('inv_sku_A')).toBe(8);
+      });
+
+      it('refuses an order whose units were released', async () => {
+        await reservations.release('O1', { onlyIfExpired: false });
+
+        expect(await reservations.confirm('O1')).toBe('RELEASED');
+
+        expect(await onHand('inv_sku_A')).toBe(10);
+      });
+
+      it('says NOT_FOUND for an order that holds nothing', async () => {
+        expect(await reservations.confirm('nope')).toBe('NOT_FOUND');
+      });
+
+      it('changes nothing at all when the stock cannot cover a line (all or nothing)', async () => {
+        await prisma.$executeRaw`UPDATE "SkuStock" SET "onHand" = 0 WHERE "skuId" = 'inv_sku_B'`;
+        // (the stock was lowered behind the repository's back, which the CHECK alone cannot see)
+
+        await expect(reservations.confirm('O1')).rejects.toThrow();
+
+        expect(await statusOf('O1')).toEqual(['RESERVED', 'RESERVED']);
+        expect(await onHand('inv_sku_A')).toBe(10);
+      });
+    });
+
+    describe('release (AC-12)', () => {
+      it('moves RESERVED to RELEASED and returns the lines it released', async () => {
+        await reserve('O1', [
+          { skuId: 'inv_sku_A', qty: 2 },
+          { skuId: 'inv_sku_B', qty: 1 },
+        ]);
+
+        const released = await reservations.release('O1', {
+          onlyIfExpired: false,
+        });
+
+        expect(released).toEqual(
+          expect.arrayContaining([
+            { skuId: 'inv_sku_A', qty: 2 },
+            { skuId: 'inv_sku_B', qty: 1 },
+          ]),
+        );
+        expect(released).toHaveLength(2);
+        expect(await statusOf('O1')).toEqual(['RELEASED', 'RELEASED']);
+      });
+
+      it('releases once: the second call finds nothing to release', async () => {
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 2 }]);
+
+        await reservations.release('O1', { onlyIfExpired: false });
+
+        expect(
+          await reservations.release('O1', { onlyIfExpired: false }),
+        ).toEqual([]);
+      });
+
+      it('never releases a paid order', async () => {
+        await prisma.skuStock.create({
+          data: { skuId: 'inv_sku_A', onHand: 5 },
+        });
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 2 }]);
+        await reservations.confirm('O1');
+
+        expect(
+          await reservations.release('O1', { onlyIfExpired: false }),
+        ).toEqual([]);
+        expect(await statusOf('O1')).toEqual(['CONFIRMED']);
+      });
+
+      it('with onlyIfExpired, leaves a hold that has not expired (a timer that came early)', async () => {
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 2 }], FUTURE());
+
+        expect(
+          await reservations.release('O1', { onlyIfExpired: true }),
+        ).toEqual([]);
+        expect(await statusOf('O1')).toEqual(['RESERVED']);
+      });
+
+      it('with onlyIfExpired, releases a hold whose expiry has passed, by the database clock', async () => {
+        await reserve(
+          'O1',
+          [{ skuId: 'inv_sku_A', qty: 2 }],
+          new Date(Date.now() - EXPIRED_AGO),
+        );
+
+        const released = await reservations.release('O1', {
+          onlyIfExpired: true,
+        });
+
+        expect(released).toEqual([{ skuId: 'inv_sku_A', qty: 2 }]);
+      });
+
+      it('releases nothing for an order that holds nothing', async () => {
+        expect(
+          await reservations.release('nope', { onlyIfExpired: false }),
+        ).toEqual([]);
+      });
+    });
+
+    describe('confirm and release at the same moment: exactly one wins (AC-13)', () => {
+      it('ends every order in CONFIRMED or RELEASED, never both, and counts the stock right', async () => {
+        await prisma.skuStock.create({
+          data: { skuId: 'inv_sku_A', onHand: 100 },
+        });
+        const orders = Array.from({ length: 30 }, (_, i) => `RACE-${i}`);
+        for (const orderId of orders) {
+          await reserve(orderId, [{ skuId: 'inv_sku_A', qty: 1 }]);
+        }
+
+        const outcomes = await Promise.all(
+          orders.flatMap((orderId) => [
+            reservations.confirm(orderId),
+            reservations.release(orderId, { onlyIfExpired: false }),
+          ]),
+        );
+
+        let confirmed = 0;
+        for (const orderId of orders) {
+          const statuses = await statusOf(orderId);
+          expect(statuses).toHaveLength(1);
+          expect(['CONFIRMED', 'RELEASED']).toContain(statuses[0]);
+          if (statuses[0] === 'CONFIRMED') confirmed++;
+        }
+        // The warehouse lost a unit for exactly the orders that were confirmed
+        const { onHand } = await prisma.skuStock.findUniqueOrThrow({
+          where: { skuId: 'inv_sku_A' },
+        });
+        expect(onHand).toBe(100 - confirmed);
+        // A release that lost found nothing; a confirm that lost said RELEASED
+        expect(
+          outcomes.some((o) => o === 'RELEASED' || o === 'CONFIRMED'),
+        ).toBe(true);
+      });
+    });
+
+    describe('findExpiredOrderIds (AC-15)', () => {
+      it('lists the orders that are RESERVED and past their expiry, oldest first, once each', async () => {
+        await reserve(
+          'LATE',
+          [{ skuId: 'inv_sku_A', qty: 1 }],
+          new Date(Date.now() - EXPIRED_AGO),
+        );
+        await reserve(
+          'EARLY',
+          [
+            { skuId: 'inv_sku_A', qty: 1 },
+            { skuId: 'inv_sku_B', qty: 1 },
+          ],
+          new Date(Date.now() - EXPIRED_AGO - 50_000),
+        );
+        await reserve('FRESH', [{ skuId: 'inv_sku_A', qty: 1 }], FUTURE());
+        await reserve(
+          'GONE',
+          [{ skuId: 'inv_sku_A', qty: 1 }],
+          new Date(Date.now() - EXPIRED_AGO - 10_000),
+        );
+        await reservations.release('GONE', { onlyIfExpired: false });
+
+        expect(await reservations.findExpiredOrderIds(10)).toEqual([
+          'EARLY',
+          'LATE',
+        ]);
+      });
+
+      it('stops at the limit', async () => {
+        for (const id of ['E1', 'E2', 'E3']) {
+          await reserve(
+            id,
+            [{ skuId: 'inv_sku_A', qty: 1 }],
+            new Date(Date.now() - EXPIRED_AGO),
+          );
+        }
+
+        expect(await reservations.findExpiredOrderIds(2)).toHaveLength(2);
+      });
+    });
+  });
+
+  describe('PrismaStockRepository', () => {
+    it('has no snapshot for a SKU without a stock row', async () => {
+      expect(await stock.getSnapshot('inv_sku_A')).toBeNull();
+    });
+
+    it('reads onHand and the units held by RESERVED reservations, and nothing else (AC-17)', async () => {
+      await prisma.skuStock.create({
+        data: { skuId: 'inv_sku_A', onHand: 10 },
+      });
+      await reserve('O1', [{ skuId: 'inv_sku_A', qty: 2 }]); // RESERVED
+      await reserve('O2', [{ skuId: 'inv_sku_A', qty: 3 }]); // RESERVED
+      await reserve('O3', [{ skuId: 'inv_sku_A', qty: 1 }]);
+      await reservations.confirm('O3'); // CONFIRMED: onHand went 10 -> 9
+      await reserve('O4', [{ skuId: 'inv_sku_A', qty: 4 }]);
+      await reservations.release('O4', { onlyIfExpired: false }); // RELEASED
+
+      expect(await stock.getSnapshot('inv_sku_A')).toEqual({
+        onHand: 9,
+        reserved: 5,
+      });
+    });
+
+    it('counts units held for a SKU that has no stock row as held, with on-hand unknown (no snapshot)', async () => {
+      await reserve('O1', [{ skuId: 'inv_sku_B', qty: 2 }]);
+
+      expect(await stock.getSnapshot('inv_sku_B')).toBeNull();
+    });
+  });
+});

@@ -136,6 +136,51 @@ export const CatalogErrorCodes = {
     message: 'SKU attributes must be non-empty string key/value pairs',
     status: HttpStatus.BAD_REQUEST,
   },
+  SKU_HAS_RESERVATIONS: {
+    code: 'CAT-016',
+    message:
+      'SKU has stock reservations and cannot be removed; unpublish the product instead',
+    status: HttpStatus.CONFLICT,
+  },
+};
+
+export const InventoryErrorCodes = {
+  OUT_OF_STOCK: {
+    code: 'INV-001',
+    message: 'Not enough stock available',
+    status: HttpStatus.CONFLICT,
+  },
+  INVALID_RESERVATION_REQUEST: {
+    code: 'INV-002',
+    message: 'Invalid reservation request',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  RESERVATION_NOT_FOUND: {
+    code: 'INV-003',
+    message: 'No stock is held for this order',
+    status: HttpStatus.NOT_FOUND,
+  },
+  RESERVATION_IN_PROGRESS: {
+    code: 'INV-004',
+    message: 'This order is being processed right now, please try again',
+    status: HttpStatus.CONFLICT,
+  },
+  RESERVATION_CONFLICT: {
+    code: 'INV-005',
+    message: 'This order already holds stock with different content',
+    status: HttpStatus.CONFLICT,
+  },
+  RESERVATION_RELEASED: {
+    code: 'INV-006',
+    message:
+      'The stock held for this order was already returned; create a new order',
+    status: HttpStatus.CONFLICT,
+  },
+  STOCK_UNAVAILABLE: {
+    code: 'INV-007',
+    message: 'Stock service is temporarily unavailable, please try again later',
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+  },
 };
 
 export const UserErrorCodes = {

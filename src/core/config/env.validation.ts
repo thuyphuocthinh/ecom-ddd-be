@@ -23,6 +23,29 @@ const OPTIONAL_POSITIVE_INT_VARS = [
   'REFRESH_TOKEN_TTL_SECONDS',
   'SESSION_ABSOLUTE_TTL_SECONDS',
 ];
+// Inventory settings are whole numbers too. The maintenance interval may be 0: that switches the
+// periodic sweep off (tests run it by hand). The hold time is at most 7 days because the
+// "give the stock back" timer is a delayed job, and a job may be delayed by 7 days at most.
+const INVENTORY_INT_VARS = [
+  {
+    name: 'RESERVATION_TTL_MINUTES',
+    unit: 'minutes',
+    min: 1,
+    max: 7 * 24 * 60,
+  },
+  {
+    name: 'INVENTORY_INFLIGHT_GRACE_SECONDS',
+    unit: 'seconds',
+    min: 1,
+    max: Number.MAX_SAFE_INTEGER,
+  },
+  {
+    name: 'INVENTORY_MAINTENANCE_INTERVAL_SECONDS',
+    unit: 'seconds',
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+  },
+];
 
 /**
  * Fails fast at boot when a required environment variable is missing or
@@ -122,6 +145,18 @@ export function validateEnv(
     const value = Number(config[name]);
     if (!Number.isInteger(value) || value <= 0) {
       errors.push(`${name} must be a positive integer (seconds)`);
+    }
+  }
+
+  for (const { name, unit, min, max } of INVENTORY_INT_VARS) {
+    if (config[name] === undefined) continue;
+    const value = Number(config[name]);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      const range =
+        max === Number.MAX_SAFE_INTEGER
+          ? `at least ${min}`
+          : `from ${min} to ${max}`;
+      errors.push(`${name} must be a whole number of ${unit}, ${range}`);
     }
   }
 

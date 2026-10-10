@@ -102,6 +102,27 @@ export const CACHE = {
         `${GLOBAL_PREFIX}:${GLOBAL_VER}:ratelimit:${CACHE.RATE_LIMIT._VER}:${route}:${identifier}`,
     },
   },
+  INVENTORY: {
+    _VER: 'v1',
+    SETTINGS: {
+      // How long the "being held" record of an order survives if nobody finishes or undoes it
+      // (the process died between Redis and Postgres). Far longer than any repair delay.
+      INFLIGHT_RECORD_TTL: buildTTL('HOUR', 1),
+    },
+    KEYS: {
+      // Units of a SKU that can be sold right now. Only Redis holds this number; it is rebuilt
+      // from Postgres (onHand minus the units held) when the key is missing.
+      AVAILABLE: (skuId: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:inventory:${CACHE.INVENTORY._VER}:available:${skuId}`,
+      // "This order is being held right now": exists from the Redis deduction until Postgres has
+      // the reservation. Stops a duplicate request and lets a repair job find a hold that leaked.
+      INFLIGHT: (orderId: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:inventory:${CACHE.INVENTORY._VER}:inflight:${orderId}`,
+      // Sorted set of the orders being held, scored by the moment (milliseconds, Redis clock)
+      // they started. Lets the repair job find the old ones without scanning keys.
+      INFLIGHT_INDEX: `${GLOBAL_PREFIX}:${GLOBAL_VER}:inventory:v1:inflight_index`,
+    },
+  },
 } as const;
 
 /*

@@ -115,6 +115,11 @@ const OTHER = defineJob<{ id: string }>({
   name: 'other-job',
   retryDelaysMs: [1_000],
 });
+const RELEASE = defineJob<{ orderId: string }>({
+  name: 'release-reservation',
+  delayMs: 900_000,
+  retryDelaysMs: [10_000],
+});
 
 /** Let queued promise callbacks run */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -473,6 +478,111 @@ describe('RabbitMqJobQueue', () => {
       expect(second).toHaveBeenCalledWith({ id: 'a' });
       expect(first).not.toHaveBeenCalled();
       expect(rabbit.published[0].key).toBe('jobs.other-job.dlq');
+    });
+  });
+
+  describe('a job held back before its first run (delayMs)', () => {
+    const DELAY_QUEUE = 'jobs.release-reservation.delay.900000ms';
+
+    it('declares a delay queue whose fixed expiry sends the message on to the main queue (AC-14)', async () => {
+      const channel = await rabbit.connect();
+
+      await queue.enqueue(RELEASE, { orderId: 'O1' });
+
+      expect(channel.queues.get(DELAY_QUEUE)).toEqual({
+        durable: true,
+        arguments: {
+          'x-message-ttl': 900_000,
+          'x-dead-letter-exchange': 'jobs',
+          'x-dead-letter-routing-key': 'release-reservation',
+        },
+      });
+    });
+
+    it('publishes a new job to the delay queue, not to the main queue, with x-attempt 0 (AC-14)', async () => {
+      await rabbit.connect();
+
+      await queue.enqueue(RELEASE, { orderId: 'O1' });
+
+      expect(rabbit.published).toHaveLength(1);
+      const sent = rabbit.published[0];
+      expect(sent.exchange).toBe('');
+      expect(sent.key).toBe(DELAY_QUEUE);
+      expect(JSON.parse(sent.content.toString())).toEqual({ orderId: 'O1' });
+      expect(sent.options.headers).toEqual({ 'x-attempt': 0 });
+    });
+
+    it('scales the delay like the retry delays, so tests can shrink it (AC-14)', async () => {
+      queue = new RabbitMqJobQueue(rabbit as unknown as RabbitMQService, {
+        retryDelayScale: 0.001,
+      });
+      queue.onModuleInit();
+      const channel = await rabbit.connect();
+
+      await queue.enqueue(RELEASE, { orderId: 'O1' });
+
+      const scaled = 'jobs.release-reservation.delay.900ms';
+      expect(channel.queues.get(scaled)?.arguments['x-message-ttl']).toBe(900);
+      expect(rabbit.published[0].key).toBe(scaled);
+    });
+
+    it('lets a failed run wait only its own retry delay, not the delay again (AC-15)', async () => {
+      queue.register(RELEASE, vi.fn().mockRejectedValue(new Error('boom')));
+      const channel = await rabbit.connect();
+
+      channel.deliver('jobs.release-reservation', { orderId: 'O1' }, 0);
+      await settle();
+
+      expect(rabbit.published[0].key).toBe(
+        'jobs.release-reservation.retry.1.10000ms',
+      );
+    });
+
+    it('declares no delay queue for a job without delayMs, and still publishes to the exchange (AC-16)', async () => {
+      const channel = await rabbit.connect();
+
+      await queue.enqueue(EMAIL, { n: 1 });
+
+      expect(
+        [...channel.queues.keys()].some((q) => q.includes('.delay.')),
+      ).toBe(false);
+      expect(rabbit.published[0].exchange).toBe('jobs');
+    });
+
+    it.each([0, -5, 1.5, Number.NaN, 604_800_001])(
+      'refuses delayMs %s, names the job, and declares no queue (AC-16)',
+      async (delayMs) => {
+        const channel = await rabbit.connect();
+        const bad = defineJob<{ orderId: string }>({
+          name: 'release-reservation',
+          delayMs,
+          retryDelaysMs: [],
+        });
+
+        await expect(queue.enqueue(bad, { orderId: 'O1' })).rejects.toThrow(
+          /release-reservation/,
+        );
+        expect(() => queue.register(bad, vi.fn())).toThrow(
+          /release-reservation/,
+        );
+        expect(channel.queues.size).toBe(0);
+        expect(rabbit.published).toHaveLength(0);
+      },
+    );
+
+    it('accepts exactly 7 days (AC-16)', async () => {
+      const channel = await rabbit.connect();
+      const week = defineJob<{ orderId: string }>({
+        name: 'release-reservation',
+        delayMs: 604_800_000,
+        retryDelaysMs: [],
+      });
+
+      await queue.enqueue(week, { orderId: 'O1' });
+
+      expect(
+        channel.queues.has('jobs.release-reservation.delay.604800000ms'),
+      ).toBe(true);
     });
   });
 

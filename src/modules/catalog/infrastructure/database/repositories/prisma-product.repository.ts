@@ -101,9 +101,24 @@ export class PrismaProductRepository implements IProductRepository {
         existingSkuIds.includes(id),
       );
       if (skusToDelete.length > 0) {
-        await tx.sku.deleteMany({
-          where: { id: { in: skusToDelete } },
-        });
+        try {
+          await tx.sku.deleteMany({
+            where: { id: { in: skusToDelete } },
+          });
+        } catch (error) {
+          // Inventory's reservations point at the SKU with ON DELETE RESTRICT, so a SKU that was
+          // ever held for an order cannot be deleted. The database decides (there is no gap
+          // between a check and the delete), and catalog does not need to know inventory.
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2003'
+          ) {
+            throw new CatalogDomainException(
+              CatalogErrorCodes.SKU_HAS_RESERVATIONS,
+            );
+          }
+          throw error;
+        }
       }
 
       if (skusToCreate.length > 0) {
@@ -151,11 +166,12 @@ export class PrismaProductRepository implements IProductRepository {
 
     if (search) {
       // Full-text match against the generated `searchVector` column + GIN
-      // index (prisma/migrations/1_add_product_search_vector) instead of
-      // `contains`/ILIKE, which can't use an index and doesn't scale past
-      // a small catalog. Prisma can't express this column, so the set of
-      // matching ids is fetched via raw SQL and intersected with the rest
-      // of the normal Prisma-driven filters/pagination below.
+      // index (created by the baseline migration, see prisma/migrations)
+      // instead of `contains`/ILIKE, which can't use an index and doesn't
+      // scale past a small catalog. Prisma only knows this column as
+      // Unsupported (it can't query it), so the set of matching ids is
+      // fetched via raw SQL and intersected with the rest of the normal
+      // Prisma-driven filters/pagination below.
       const matches = await this.prisma.$queryRaw<{ id: string }[]>`
         SELECT id FROM "Product"
         WHERE "searchVector" @@ plainto_tsquery('simple', ${search});

@@ -14,6 +14,8 @@ import type {
   JobQueueOptions,
 } from './job-queue.port.js';
 import { describeFailure } from './job-failure.js';
+import { assertValidDelay } from './job-delay.js';
+import { JobTopology } from './job-topology.js';
 
 const DRAIN_TIMEOUT_MS = 30_000;
 const REQUEUE_PAUSE_MS = 1_000;
@@ -27,16 +29,8 @@ interface KnownJob {
 }
 
 /**
- * Job queue on RabbitMQ. One exchange (`jobs`) and, per kind of job:
- *
- *   jobs.<name>          main queue; workers consume here
- *   jobs.<name>.retry.N.<ms>ms  one queue per retry, with a fixed TTL; when it expires the job is
- *                        dead-lettered back to the main queue. The TTL is in the name, because
- *                        RabbitMQ refuses to redeclare a queue with different arguments: changing a
- *                        retry delay creates a new queue instead of breaking every start-up. The TTL is fixed per queue
- *                        because a message with a long TTL at the head of a queue holds back
- *                        the shorter ones behind it.
- *   jobs.<name>.dlq      jobs that failed after the last retry, kept for people to look at
+ * Job queue on RabbitMQ. The queues of a job kind (main, retry, delay, dead letter) are described
+ * and declared by `JobTopology`; this class runs the workers and decides what happens to a job.
  *
  * A failing job is retried by publishing a copy to the next retry queue and only then
  * acknowledging the original, so it is never lost; dying between the two steps can at worst
@@ -47,10 +41,8 @@ export class RabbitMqJobQueue
 {
   private readonly logger = new Logger(RabbitMqJobQueue.name);
   private readonly jobs = new Map<string, KnownJob>();
-  private readonly asserted = new WeakMap<amqp.ConfirmChannel, Set<string>>();
   private readonly inFlight = new Set<Promise<void>>();
-  private readonly namespace: string;
-  private readonly delayScale: number;
+  private readonly topology: JobTopology;
   private draining = false;
   // prefetch and consume are two calls; two jobs set up at the same time must not interleave them
   private setUpChain: Promise<unknown> = Promise.resolve();
@@ -59,8 +51,7 @@ export class RabbitMqJobQueue
     private readonly rabbit: RabbitMQService,
     options: JobQueueOptions = {},
   ) {
-    this.namespace = options.namespace ?? '';
-    this.delayScale = options.retryDelayScale ?? 1;
+    this.topology = new JobTopology(options.namespace, options.retryDelayScale);
   }
 
   onModuleInit(): void {
@@ -88,16 +79,19 @@ export class RabbitMqJobQueue
       throw new ServiceUnavailableException('Message broker is unavailable');
     }
     try {
-      await this.assertTopology(channel, job);
+      await this.topology.declare(channel, job);
     } catch (error) {
       this.logger.error(
         `Could not prepare queues for "${job.name}": ${(error as Error).message}`,
       );
       throw new ServiceUnavailableException('Message broker is unavailable');
     }
+    // A delayed job goes into its delay queue (default exchange, routed by queue name, as the
+    // retries are); everything else goes straight to the main queue through the exchange
+    const delayQueue = this.topology.names(job).delay;
     await this.rabbit.publish(
-      this.exchange,
-      job.name,
+      delayQueue ? '' : this.topology.exchange,
+      delayQueue ?? job.name,
       Buffer.from(JSON.stringify(data)),
       {
         contentType: 'application/json',
@@ -125,24 +119,6 @@ export class RabbitMqJobQueue
     clearTimeout(timer);
   }
 
-  private get exchange(): string {
-    return `${this.namespace}jobs`;
-  }
-
-  private queueNames(job: JobDefinition<any>) {
-    const main = `${this.exchange}.${job.name}`;
-    return {
-      main,
-      retry: (n: number) => `${main}.retry.${n}.${this.retryTtl(job, n)}ms`,
-      dlq: `${main}.dlq`,
-    };
-  }
-
-  /** How long a message waits in retry queue `n` (1-based) before it goes back to the main queue. */
-  private retryTtl(job: JobDefinition<any>, n: number): number {
-    return Math.max(1, Math.round(job.retryDelaysMs[n - 1] * this.delayScale));
-  }
-
   private know(job: JobDefinition<any>): KnownJob {
     let known = this.jobs.get(job.name);
     if (!known) {
@@ -160,6 +136,7 @@ export class RabbitMqJobQueue
       if (job.retryDelaysMs.some((ms) => !(ms > 0))) {
         throw new Error(`Job "${job.name}" has a non-positive retry delay`);
       }
+      assertValidDelay(job);
       known = { job };
       this.jobs.set(job.name, known);
     }
@@ -186,13 +163,13 @@ export class RabbitMqJobQueue
     channel: amqp.ConfirmChannel,
     known: KnownJob,
   ): Promise<void> {
-    await this.assertTopology(channel, known.job);
+    await this.topology.declare(channel, known.job);
     if (!known.handler || known.consumerTag || this.draining) return;
 
     const { job, handler } = known;
     await channel.prefetch(job.concurrency ?? 1);
     const { consumerTag } = await channel.consume(
-      this.queueNames(job).main,
+      this.topology.names(job).main,
       (message) => {
         if (!message) {
           // The broker cancelled this consumer (e.g. the queue was deleted): listen again
@@ -218,35 +195,6 @@ export class RabbitMqJobQueue
     );
     known.consumerTag = consumerTag;
     known.channel = channel;
-  }
-
-  private async assertTopology(
-    channel: amqp.ConfirmChannel,
-    job: JobDefinition<any>,
-  ): Promise<void> {
-    let done = this.asserted.get(channel);
-    if (!done) {
-      done = new Set();
-      this.asserted.set(channel, done);
-    }
-    if (done.has(job.name)) return;
-
-    const names = this.queueNames(job);
-    await channel.assertExchange(this.exchange, 'direct', { durable: true });
-    await channel.assertQueue(names.main, { durable: true });
-    await channel.bindQueue(names.main, this.exchange, job.name);
-    for (const index of job.retryDelaysMs.keys()) {
-      await channel.assertQueue(names.retry(index + 1), {
-        durable: true,
-        arguments: {
-          'x-message-ttl': this.retryTtl(job, index + 1),
-          'x-dead-letter-exchange': this.exchange,
-          'x-dead-letter-routing-key': job.name,
-        },
-      });
-    }
-    await channel.assertQueue(names.dlq, { durable: true });
-    done.add(job.name);
   }
 
   private async handle(
@@ -278,7 +226,7 @@ export class RabbitMqJobQueue
         await this.republish(
           channel,
           message,
-          this.queueNames(job).retry(attempt + 1),
+          this.topology.names(job).retry(attempt + 1),
           attempt + 1,
           reason,
         );
@@ -301,7 +249,7 @@ export class RabbitMqJobQueue
     return this.republish(
       channel,
       message,
-      this.queueNames(job).dlq,
+      this.topology.names(job).dlq,
       attempt + 1,
       reason,
     );

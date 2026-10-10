@@ -138,6 +138,16 @@ describe('Job queue on RabbitMQ (e2e)', () => {
         await remove((channel) => channel.deleteQueue(queue));
       }
     }
+    for (const suffix of [
+      '',
+      '.delay.200ms',
+      '.retry.1.10ms',
+      '.dlq',
+    ] as const) {
+      await remove((channel) =>
+        channel.deleteQueue(`${NAMESPACE}jobs.test-delayed${suffix}`),
+      );
+    }
     await remove((channel) => channel.deleteExchange(`${NAMESPACE}jobs`));
     await admin.close().catch(() => undefined);
     process.env = { ...original };
@@ -321,6 +331,66 @@ describe('Job queue on RabbitMQ (e2e)', () => {
       15_000,
     );
   }, 40_000);
+
+  describe('a job held back before its first run (delayMs)', () => {
+    // The suite shrinks every delay 100 times: a 20 s delay waits 200 ms and a 1 s retry waits 10 ms
+    const DELAYED = defineJob<{ id: string }>({
+      name: 'test-delayed',
+      delayMs: 20_000,
+      retryDelaysMs: [1_000],
+    });
+    const delayedQueues = {
+      main: `${NAMESPACE}jobs.test-delayed`,
+      delay: `${NAMESPACE}jobs.test-delayed.delay.200ms`,
+      retry: `${NAMESPACE}jobs.test-delayed.retry.1.10ms`,
+      dlq: `${NAMESPACE}jobs.test-delayed.dlq`,
+    };
+    const queueOf = () => moduleRef.get<IJobQueue>(JOB_QUEUE);
+    // A job is registered once (a second `register` would not replace the worker that is
+    // already listening), so each test says what the handler does through this variable
+    let behaviour: () => Promise<void> = async () => undefined;
+    beforeAll(() => {
+      queueOf().register(DELAYED, () => behaviour());
+    });
+
+    it('keeps the job in the delay queue first, then runs it exactly once after the delay (AC-14)', async () => {
+      const ranAt: number[] = [];
+      behaviour = async () => {
+        ranAt.push(Date.now());
+      };
+
+      const enqueuedAt = Date.now();
+      await queueOf().enqueue(DELAYED, { id: 'a' });
+
+      // Not in the main queue and not run yet: it is waiting in the delay queue
+      expect(await depth(delayedQueues.delay)).toBe(1);
+      expect(await depth(delayedQueues.main)).toBe(0);
+      expect(ranAt).toHaveLength(0);
+
+      await until(() => ranAt.length === 1, 'the delayed job to run');
+      expect(ranAt[0] - enqueuedAt).toBeGreaterThanOrEqual(150);
+      expect(await depth(delayedQueues.delay)).toBe(0);
+
+      // And it does not run a second time
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(ranAt).toHaveLength(1);
+    });
+
+    it('lets a failed run wait only its own retry delay, not the delay again (AC-15)', async () => {
+      const ranAt: number[] = [];
+      behaviour = async () => {
+        ranAt.push(Date.now());
+        if (ranAt.length === 1) throw new Error('boom');
+      };
+
+      await queueOf().enqueue(DELAYED, { id: 'b' });
+      await until(() => ranAt.length === 2, 'the retry to run');
+
+      // The retry waited about 10 ms, far less than the 200 ms delay
+      expect(ranAt[1] - ranAt[0]).toBeLessThan(150);
+      expect(await depth(delayedQueues.dlq)).toBe(0);
+    });
+  });
 
   it('lets the job that is running finish when the application shuts down (AC-10)', async () => {
     let release!: () => void;
