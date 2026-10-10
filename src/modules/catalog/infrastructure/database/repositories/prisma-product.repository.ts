@@ -13,7 +13,10 @@ import {
   CACHE,
   TTL,
 } from '@/core/index.js';
-import { FindProductsParams } from '../../../domain/repositories/catalog.repository.js';
+import {
+  FindProductsParams,
+  SkuLookupItem,
+} from '../../../domain/repositories/catalog.repository.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
 
 @Injectable()
@@ -141,6 +144,29 @@ export class PrismaProductRepository implements IProductRepository {
     await this.redis.invalidateDetail(
       CACHE.CATALOG.KEYS.PRODUCT_DETAIL(product.id),
     );
+  }
+
+  async findSkusByIds(skuIds: string[]): Promise<SkuLookupItem[]> {
+    if (skuIds.length === 0) return [];
+    const rows = await this.prisma.sku.findMany({
+      where: { id: { in: skuIds } },
+      select: {
+        id: true,
+        productId: true,
+        price: true,
+        attributes: true,
+        product: { select: { name: true, thumbnail: true, status: true } },
+      },
+    });
+    return rows.map((row) => ({
+      skuId: row.id,
+      productId: row.productId,
+      productName: row.product.name,
+      thumbnail: row.product.thumbnail,
+      attributes: row.attributes as Record<string, string>,
+      price: Number(row.price),
+      published: row.product.status === 'PUBLISHED',
+    }));
   }
 
   async findList(

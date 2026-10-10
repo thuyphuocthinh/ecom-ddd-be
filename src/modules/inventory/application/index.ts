@@ -13,5 +13,6 @@ export * from './commands/repair-in-flight-holds.handler.js';
 
 export * from './services/stock-rebuilder.service.js';
 export * from './services/reservation-releaser.service.js';
+export * from './services/stock-availability.service.js';
 export * from './jobs/release-reservation.job.js';
 export * from './maintenance/reservation-maintenance.service.js';

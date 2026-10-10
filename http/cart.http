@@ -1,0 +1,133 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Giỏ hàng (cart) — test API bằng extension "REST Client" của VS Code (humao.rest-client).
+# Bấm "Send Request" ngay phía trên dòng GET/POST/PUT/DELETE.
+#
+# - Cần một tài khoản đã đăng ký (xem http/auth.http). Request 1 đăng nhập để lấy token.
+# - Cần có sản phẩm và tồn kho (một lần, theo thứ tự):
+#     docker exec -i ecom_postgres psql -U root -d ecom_db < scripts/seed-catalog.sql
+#     docker exec -i ecom_postgres psql -U root -d ecom_db < scripts/seed-stock.sql
+#   Các SKU dùng dưới đây là của file seed: seed_sku_flash (AirPods, chỉ còn 10 cái),
+#   seed_sku_tshirt_m, seed_sku_draft_watch (sản phẩm nháp, không thêm được vào giỏ).
+# - Giỏ chỉ nhớ món nào, bao nhiêu cái và giá lúc bỏ vào. Mỗi lần xem (GET /cart) giá, tồn kho
+#   và cờ được tính lại: priceChanged, unpublished, outOfStock, notEnoughStock.
+#   Giỏ KHÔNG giữ hàng: chỉ cảnh báo, việc chặn xảy ra lúc đặt đơn.
+# - POST /cart/items là CỘNG DỒN (gửi hai lần là cộng hai lần); PUT /cart/items/:skuId là ĐẶT số lượng
+#   (gửi lại bao nhiêu lần cũng như nhau, và dòng phải có sẵn).
+# - Giới hạn: 50 dòng khác nhau, 99 cái mỗi dòng. Mỗi request tối đa 60 lần/phút/user.
+# - Thử đổi giá để thấy cờ priceChanged:
+#     docker exec ecom_postgres psql -U root -d ecom_db -c "UPDATE \"Sku\" SET price = 4990000 WHERE id = 'seed_sku_flash';"
+#   Thử tồn kho thấp để thấy notEnoughStock: đặt số lượng trong giỏ lớn hơn số còn lại (request 5).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@email = thuyphuocthinhtpt+1@gmail.com
+@password = 123456Aa
+
+# Lấy tự động từ response của request 1 (không cần sửa)
+@accessToken = {{login.response.body.$.data.accessToken}}
+
+
+### 1. Đăng nhập để lấy token (5 lần/15 phút/IP)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+
+### 2. Xem giỏ (giỏ trống thì items rỗng, subtotal 0)
+GET {{baseUrl}}/cart
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Thêm một món (201): cộng dồn nếu đã có; addedPrice là giá hiện tại
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "skuId": "seed_sku_flash",
+  "quantity": 2
+}
+
+
+### 4. Thêm một món khác
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "skuId": "seed_sku_tshirt_m",
+  "quantity": 1
+}
+
+
+### 5. Đặt số lượng (PUT, idempotent). Thử 20 để thấy notEnoughStock khi xem giỏ (seed_sku_flash chỉ còn 10)
+PUT {{baseUrl}}/cart/items/seed_sku_flash
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "quantity": 20
+}
+
+
+### 6. Xem giỏ lại: mỗi dòng có price hiện tại, available, flags; mới thêm nằm trên cùng
+GET {{baseUrl}}/cart
+Authorization: Bearer {{accessToken}}
+
+
+### 7. Sản phẩm nháp không thêm được → 404 CART-003
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "skuId": "seed_sku_draft_watch",
+  "quantity": 1
+}
+
+
+### 8. Vượt 99 cái một dòng → 409 CART-002 (giỏ giữ nguyên số lượng cũ)
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "skuId": "seed_sku_tshirt_m",
+  "quantity": 99
+}
+
+
+### 9. Đặt số lượng cho món chưa có trong giỏ → 404 CART-004
+PUT {{baseUrl}}/cart/items/seed_sku_dellxps
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "quantity": 1
+}
+
+
+### 10. Số lượng sai (0, số lẻ, quá 1000) → 400; trường lạ (price, userId) → 400
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "skuId": "seed_sku_flash",
+  "quantity": 0
+}
+
+
+### 11. Xóa một món (204, gọi lại hoặc món không có vẫn 204)
+DELETE {{baseUrl}}/cart/items/seed_sku_tshirt_m
+Authorization: Bearer {{accessToken}}
+
+
+### 12. Xóa cả giỏ (204)
+DELETE {{baseUrl}}/cart
+Authorization: Bearer {{accessToken}}

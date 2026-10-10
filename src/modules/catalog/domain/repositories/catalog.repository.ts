@@ -15,9 +15,29 @@ export interface FindProductsParams {
   maxPrice?: number;
 }
 
+/**
+ * What another module (the cart) needs to know about a SKU, read in one query without loading
+ * whole products. `published` is true only while the product of the SKU is on sale.
+ */
+export interface SkuLookupItem {
+  skuId: string;
+  productId: string;
+  productName: string;
+  thumbnail: string | null;
+  attributes: Record<string, string>;
+  price: number;
+  published: boolean;
+}
+
 export interface IProductRepository {
   findById(id: string): Promise<Product | null>;
   save(product: Product): Promise<void>;
+
+  /**
+   * Many SKUs in ONE query, straight from the database (never from the product cache, so a price
+   * that just changed is seen at once). SKUs that do not exist are simply not in the result.
+   */
+  findSkusByIds(skuIds: string[]): Promise<SkuLookupItem[]>;
 
   // For Keyset pagination
   findList(params: FindProductsParams): Promise<PaginatedResult<Product>>;

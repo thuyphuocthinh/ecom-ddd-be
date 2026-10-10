@@ -196,6 +196,39 @@ export const LocationErrorCodes = {
   },
 };
 
+export const CartErrorCodes = {
+  DOMAIN_EXCEPTION: {
+    code: 'CART-000',
+    message: 'Cart domain exception',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  CART_FULL: {
+    code: 'CART-001',
+    message: 'The cart can hold at most 50 different items',
+    status: HttpStatus.CONFLICT,
+  },
+  QUANTITY_LIMIT: {
+    code: 'CART-002',
+    message: 'You can have at most 99 of one item in the cart',
+    status: HttpStatus.CONFLICT,
+  },
+  ITEM_NOT_AVAILABLE: {
+    code: 'CART-003',
+    message: 'This item is not available',
+    status: HttpStatus.NOT_FOUND,
+  },
+  ITEM_NOT_IN_CART: {
+    code: 'CART-004',
+    message: 'This item is not in the cart',
+    status: HttpStatus.NOT_FOUND,
+  },
+  CART_UNAVAILABLE: {
+    code: 'CART-005',
+    message: 'The cart is temporarily unavailable, please try again later',
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+  },
+};
+
 export const AddressErrorCodes = {
   DOMAIN_EXCEPTION: {
     code: 'ADDR-000',

@@ -123,6 +123,19 @@ export const CACHE = {
       INFLIGHT_INDEX: `${GLOBAL_PREFIX}:${GLOBAL_VER}:inventory:v1:inflight_index`,
     },
   },
+  CART: {
+    _VER: 'v1',
+    SETTINGS: {
+      // A cart nobody changed for this long disappears; every change starts the time again
+      TTL: buildTTL('DAY', 30),
+    },
+    KEYS: {
+      // One Redis hash per user: a field per SKU, its value a small JSON with the quantity, the
+      // price when it was put in and the moment it was first put in (see the cart module)
+      CART: (userId: string) =>
+        `${GLOBAL_PREFIX}:${GLOBAL_VER}:cart:${CACHE.CART._VER}:user:${userId}`,
+    },
+  },
 } as const;
 
 /*

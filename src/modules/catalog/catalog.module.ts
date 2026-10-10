@@ -27,6 +27,7 @@ import {
   AddSkuHandler,
   RemoveSkuHandler,
   UpdateSkuPriceHandler,
+  SkuLookupService,
 } from './application/index.js';
 
 // Repositories
@@ -77,6 +78,8 @@ const QueryHandlers = [
     // Handlers
     ...CommandHandlers,
     ...QueryHandlers,
+    SkuLookupService,
   ],
+  exports: [SkuLookupService], // the cart reads many SKUs at once with it
 })
 export class CatalogModule {}

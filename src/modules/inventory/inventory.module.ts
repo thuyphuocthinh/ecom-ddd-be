@@ -10,6 +10,7 @@ import {
   ReleaseExpiredReservationsHandler,
   RepairInFlightHoldsHandler,
   StockRebuilder,
+  StockAvailabilityService,
   ReservationReleaser,
   ReservationMaintenance,
   ReleaseReservationJobHandler,
@@ -34,7 +35,7 @@ const CommandHandlers = [
 /**
  * Stock: how many units of each SKU exist, how many are held for unpaid orders, and how many can
  * be sold now. No HTTP endpoints yet: the order module will call the commands through the
- * CommandBus. PrismaService, RedisService, LockService and the job queue come from the global
+ * CommandBus, and the cart reads availability through the exported StockAvailabilityService. PrismaService, RedisService, LockService and the job queue come from the global
  * modules in AppModule.
  */
 @Module({
@@ -53,10 +54,12 @@ const CommandHandlers = [
         createReleaseReservationJob(config.reservationTtlSeconds),
     },
     StockRebuilder,
+    StockAvailabilityService,
     ReservationReleaser,
     ReleaseReservationJobHandler,
     ReservationMaintenance,
     ...CommandHandlers,
   ],
+  exports: [StockAvailabilityService], // the cart reads the stock of many SKUs at once with it
 })
 export class InventoryModule {}

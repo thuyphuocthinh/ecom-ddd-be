@@ -32,3 +32,4 @@ export * from './commands/update-sku-price.command.js';
 export * from './commands/update-sku-price.handler.js';
 export * from './queries/get-category-by-id.query.js';
 export * from './queries/get-category-by-id.handler.js';
+export * from './services/sku-lookup.service.js';
