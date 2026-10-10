@@ -1,0 +1,21 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Locations (tỉnh/thành và phường/xã sau sáp nhập 2025) — test API bằng extension
+# "REST Client" của VS Code (humao.rest-client).
+#
+# - Công khai, không cần đăng nhập, chỉ đọc. Cơ cấu hai cấp: tỉnh/thành rồi phường/xã (không có quận/huyện).
+# - Dữ liệu phải được nạp trước (một lần):
+#     docker exec -i ecom_postgres psql -U root -d ecom_db < scripts/seed-administrative-units.sql
+#   Chưa nạp thì danh sách tỉnh trả về rỗng.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+
+### 1. Danh sách 34 tỉnh/thành (xếp theo thứ tự chữ cái tiếng Việt)
+# @name provinces
+GET {{baseUrl}}/locations/provinces
+
+### 2. Phường/xã của một tỉnh: 01 = Thành phố Hà Nội (đổi mã tỉnh lấy từ bước 1: 79 = Thành phố Hồ Chí Minh...)
+GET {{baseUrl}}/locations/provinces/01/wards
+
+### 3. Mã tỉnh không có: 404, mã lỗi LOC-001
+GET {{baseUrl}}/locations/provinces/99/wards

@@ -6,6 +6,7 @@ import { CatalogModule } from './modules/catalog/catalog.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { InventoryModule } from './modules/inventory/inventory.module.js';
+import { LocationsModule } from './modules/locations/locations.module.js';
 import { validateEnv } from './core/config/env.validation.js';
 import { resolveCorrelationId } from './core/utils/correlation-id.util.js';
 import { DatabaseModule } from './core/infrastructure/database/database.module.js';
@@ -42,6 +43,7 @@ import { ImageStorageModule } from './core/infrastructure/storage/image-storage.
     AuthModule,
     CatalogModule,
     InventoryModule,
+    LocationsModule,
   ],
   controllers: [AppController],
 })

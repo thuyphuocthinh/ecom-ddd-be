@@ -217,3 +217,40 @@ model UserCredential {
   @@unique([provider, identifier]) // không thể có 2 account cùng identifier/provider
   @@index([userId])
 }
+
+// Vietnamese administrative units after the 2025 merger: two levels, province-level units (34) and the
+// wards/communes/special zones under them (3,321); there is no district level. Reference data, filled by
+// scripts/seed-administrative-units.sql. Names are stored WITHOUT the kind ("Ba Đình"); the kind is in
+// `type` and the full name ("Phường Ba Đình") is put together when it is shown.
+// Hand-written in the migration (Prisma cannot express them): CHECKs on the code length and non-empty names.
+
+// CITY = one of the 6 centrally-run cities (Hà Nội, Hải Phòng, Huế, Đà Nẵng, Hồ Chí Minh, Cần Thơ)
+enum ProvinceType {
+  CITY
+  PROVINCE
+}
+
+enum WardType {
+  WARD
+  COMMUNE
+  SPECIAL_ZONE
+}
+
+model Province {
+  code String       @id @db.VarChar(2)
+  name String       @db.VarChar(100)
+  type ProvinceType
+
+  wards Ward[]
+}
+
+model Ward {
+  code         String   @id @db.VarChar(5)
+  provinceCode String   @db.VarChar(2)
+  name         String   @db.VarChar(100)
+  type         WardType
+
+  province Province @relation(fields: [provinceCode], references: [code], onDelete: Restrict)
+
+  @@index([provinceCode])
+}

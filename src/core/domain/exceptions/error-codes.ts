@@ -183,6 +183,19 @@ export const InventoryErrorCodes = {
   },
 };
 
+export const LocationErrorCodes = {
+  PROVINCE_NOT_FOUND: {
+    code: 'LOC-001',
+    message: 'Province not found',
+    status: HttpStatus.NOT_FOUND,
+  },
+  WARD_NOT_FOUND: {
+    code: 'LOC-002',
+    message: 'Ward not found',
+    status: HttpStatus.NOT_FOUND,
+  },
+};
+
 export const UserErrorCodes = {
   DOMAIN_EXCEPTION: {
     code: 'USR-000',
