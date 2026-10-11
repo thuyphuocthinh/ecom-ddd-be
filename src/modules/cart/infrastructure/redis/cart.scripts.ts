@@ -98,14 +98,17 @@ return {0, line.q, tostring(line.p)}
 `;
 
 /**
- * Removes a line. The time to live starts again only while lines remain (an empty hash is gone).
+ * Removes one or more lines in one step. The time to live starts again only while lines remain
+ * (an empty hash is gone). A SKU that is not in the cart is skipped.
  *
- * KEYS[1]  the cart   ARGV[1]  sku id   ARGV[2]  time to live, in seconds
+ * KEYS[1]  the cart   ARGV[1]  time to live, in seconds   ARGV[2...]  the sku ids
  */
 export const REMOVE_SCRIPT = `
-redis.call('HDEL', KEYS[1], ARGV[1])
+for i = 2, #ARGV do
+  redis.call('HDEL', KEYS[1], ARGV[i])
+end
 if redis.call('HLEN', KEYS[1]) > 0 then
-  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
 end
 return 0
 `;

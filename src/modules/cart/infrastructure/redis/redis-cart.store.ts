@@ -103,8 +103,13 @@ export class RedisCartStore implements ICartStore {
   }
 
   async remove(userId: string, skuId: string): Promise<void> {
+    await this.removeMany(userId, [skuId]);
+  }
+
+  async removeMany(userId: string, skuIds: string[]): Promise<void> {
+    if (skuIds.length === 0) return;
     await this.run((client) =>
-      client.eval(REMOVE_SCRIPT, 1, KEY(userId), skuId, TTL_SECONDS),
+      client.eval(REMOVE_SCRIPT, 1, KEY(userId), TTL_SECONDS, ...skuIds),
     );
   }
 

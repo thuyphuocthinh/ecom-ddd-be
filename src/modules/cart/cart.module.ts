@@ -8,6 +8,7 @@ import {
   RemoveCartItemHandler,
   ClearCartHandler,
   GetCartHandler,
+  CartOrderingService,
 } from './application/index.js';
 import { RedisCartStore } from './infrastructure/index.js';
 import { CartController } from './presentation/controllers/cart.controller.js';
@@ -27,6 +28,8 @@ import { CartController } from './presentation/controllers/cart.controller.js';
     RemoveCartItemHandler,
     ClearCartHandler,
     GetCartHandler,
+    CartOrderingService,
   ],
+  exports: [CartOrderingService], // the order module reads the lines and clears what it ordered
 })
 export class CartModule {}

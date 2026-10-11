@@ -44,6 +44,12 @@ export interface ICartStore {
   /** Removes the item; nothing happens when it is not there. */
   remove(userId: string, skuId: string): Promise<void>;
 
+  /**
+   * Removes several items in one atomic step; items that are not there are skipped and the others
+   * stay. Nothing happens for an empty list.
+   */
+  removeMany(userId: string, skuIds: string[]): Promise<void>;
+
   /** Removes everything; nothing happens when the cart is empty. */
   clear(userId: string): Promise<void>;
 

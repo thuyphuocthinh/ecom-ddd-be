@@ -8,3 +8,4 @@ export * from './commands/clear-cart.command.js';
 export * from './commands/clear-cart.handler.js';
 export * from './queries/get-cart.query.js';
 export * from './queries/get-cart.handler.js';
+export * from './services/cart-ordering.service.js';
