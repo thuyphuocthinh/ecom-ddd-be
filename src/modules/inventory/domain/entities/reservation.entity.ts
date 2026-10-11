@@ -4,10 +4,12 @@ import { InventoryDomainException } from '../exceptions/inventory.exception.js';
 export enum ReservationStatus {
   /** Held for an unpaid order; counts against what can be sold. */
   RESERVED = 'RESERVED',
-  /** Paid: the units were taken out of the warehouse stock. Final. */
+  /** Paid: the units were taken out of the warehouse stock. Only a return can move it on. */
   CONFIRMED = 'CONFIRMED',
-  /** Cancelled or expired: the units were given back. Final. */
+  /** Cancelled or expired before it was paid: the units were given back. Final. */
   RELEASED = 'RELEASED',
+  /** Was CONFIRMED, then the order was cancelled before delivery: the units were put back. Final. */
+  RETURNED = 'RETURNED',
 }
 
 export interface StockItem {
@@ -28,8 +30,8 @@ const ORDER_ID_MAX_LENGTH = 100; // the column is VARCHAR(100)
 /**
  * The stock held for one order: one line per SKU. Its id is the order id.
  *
- * Moving a reservation from RESERVED to CONFIRMED or RELEASED does NOT happen here: it is one
- * conditional SQL update in the repository (`WHERE status = 'RESERVED'`), so that when a payment
+ * Moving a reservation to another status does NOT happen here: it is one conditional SQL update in
+ * the repository (`WHERE status = 'RESERVED'`, or 'CONFIRMED' for a return), so that when a payment
  * and an expiry arrive together exactly one of them wins. Loading the entity, changing it and
  * saving it back could let both win.
  */

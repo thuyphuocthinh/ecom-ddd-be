@@ -4,6 +4,8 @@ export * from './commands/confirm-reservation.command.js';
 export * from './commands/confirm-reservation.handler.js';
 export * from './commands/release-reservation.command.js';
 export * from './commands/release-reservation.handler.js';
+export * from './commands/return-reservation.command.js';
+export * from './commands/return-reservation.handler.js';
 export * from './commands/release-expired-reservation.command.js';
 export * from './commands/release-expired-reservation.handler.js';
 export * from './commands/release-expired-reservations.command.js';

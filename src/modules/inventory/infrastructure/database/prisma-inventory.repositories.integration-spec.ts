@@ -377,6 +377,160 @@ describe('Inventory repositories (Integration)', () => {
       });
     });
 
+    describe('returnConfirmed (AC-25, AC-26)', () => {
+      const onHand = async (skuId: string) =>
+        (await prisma.skuStock.findUniqueOrThrow({ where: { skuId } })).onHand;
+
+      beforeEach(async () => {
+        await prisma.skuStock.createMany({
+          data: [
+            { skuId: 'inv_sku_A', onHand: 10 },
+            { skuId: 'inv_sku_B', onHand: 4 },
+          ],
+        });
+        await reserve('O1', [
+          { skuId: 'inv_sku_A', qty: 2 },
+          { skuId: 'inv_sku_B', qty: 1 },
+        ]);
+      });
+
+      it('moves CONFIRMED to RETURNED and puts the units back into the warehouse, for every line', async () => {
+        await reservations.confirm('O1');
+        expect(await onHand('inv_sku_A')).toBe(8);
+        expect(await onHand('inv_sku_B')).toBe(3);
+
+        const result = await reservations.returnConfirmed('O1');
+
+        expect(result.kind).toBe('RETURNED');
+        if (result.kind !== 'RETURNED') throw new Error('unreachable');
+        expect(
+          [...result.items].sort((a, b) => a.skuId.localeCompare(b.skuId)),
+        ).toEqual([
+          { skuId: 'inv_sku_A', qty: 2 },
+          { skuId: 'inv_sku_B', qty: 1 },
+        ]);
+        expect(await statusOf('O1')).toEqual(['RETURNED', 'RETURNED']);
+        expect(await onHand('inv_sku_A')).toBe(10);
+        expect(await onHand('inv_sku_B')).toBe(4);
+      });
+
+      it('does nothing the second time and puts the units back only once', async () => {
+        await reservations.confirm('O1');
+        await reservations.returnConfirmed('O1');
+
+        expect(await reservations.returnConfirmed('O1')).toEqual({
+          kind: 'ALREADY_RETURNED',
+        });
+
+        expect(await onHand('inv_sku_A')).toBe(10);
+        expect(await statusOf('O1')).toEqual(['RETURNED', 'RETURNED']);
+      });
+
+      it('has nothing to return for an order that was never paid (RESERVED or RELEASED)', async () => {
+        expect(await reservations.returnConfirmed('O1')).toEqual({
+          kind: 'NOT_CONFIRMED',
+        });
+        await reservations.release('O1', { onlyIfExpired: false });
+        expect(await reservations.returnConfirmed('O1')).toEqual({
+          kind: 'NOT_CONFIRMED',
+        });
+
+        expect(await statusOf('O1')).toEqual(['RELEASED', 'RELEASED']);
+        expect(await onHand('inv_sku_A')).toBe(10);
+      });
+
+      it('says NOT_FOUND for an order that holds nothing', async () => {
+        expect(await reservations.returnConfirmed('nope')).toEqual({
+          kind: 'NOT_FOUND',
+        });
+      });
+
+      it('changes nothing at all when a line cannot be put back (all or nothing)', async () => {
+        await reservations.confirm('O1');
+        // the stock row of B disappears behind the repository's back
+        await prisma.$executeRaw`DELETE FROM "SkuStock" WHERE "skuId" = 'inv_sku_B'`;
+
+        await expect(reservations.returnConfirmed('O1')).rejects.toThrow();
+
+        expect(await statusOf('O1')).toEqual(['CONFIRMED', 'CONFIRMED']);
+        expect(await onHand('inv_sku_A')).toBe(8); // not put back: the whole transaction rolled back
+      });
+
+      it('is not confirmed again, released or reserved again after the return', async () => {
+        await reservations.confirm('O1');
+        await reservations.returnConfirmed('O1');
+
+        // a confirm finds the hold gone; a release finds nothing RESERVED
+        expect(await reservations.confirm('O1')).toBe('RELEASED');
+        expect(
+          await reservations.release('O1', { onlyIfExpired: false }),
+        ).toEqual([]);
+        expect((await reservations.findByOrderId('O1'))?.status).toBe(
+          ReservationStatus.RETURNED,
+        );
+        expect(await onHand('inv_sku_A')).toBe(10);
+      });
+
+      it('counts what is held correctly afterwards: a returned order is no longer held', async () => {
+        await reservations.confirm('O1');
+        await reservations.returnConfirmed('O1');
+
+        expect(await stock.getSnapshot('inv_sku_A')).toEqual({
+          onHand: 10,
+          reserved: 0,
+        });
+      });
+
+      it('puts the units back exactly once when ten returns of the same order come together', async () => {
+        await reservations.confirm('O1');
+
+        const results = await Promise.all(
+          Array.from({ length: 10 }, () => reservations.returnConfirmed('O1')),
+        );
+
+        expect(results.filter((r) => r.kind === 'RETURNED')).toHaveLength(1);
+        expect(
+          results.filter((r) => r.kind === 'ALREADY_RETURNED'),
+        ).toHaveLength(9);
+        expect(await onHand('inv_sku_A')).toBe(10);
+        expect(await onHand('inv_sku_B')).toBe(4);
+      });
+
+      it('races a confirm and a release for the same order: the return only ever touches CONFIRMED', async () => {
+        await prisma.skuStock.update({
+          where: { skuId: 'inv_sku_A' },
+          data: { onHand: 100 },
+        });
+        const orders = Array.from({ length: 30 }, (_, i) => `RET-${i}`);
+        for (const orderId of orders) {
+          await reserve(orderId, [{ skuId: 'inv_sku_A', qty: 1 }]);
+        }
+        // half are confirmed first, so a return has something to put back
+        for (const orderId of orders.slice(0, 15)) {
+          await reservations.confirm(orderId);
+        }
+
+        await Promise.all(
+          orders.flatMap((orderId) => [
+            reservations.returnConfirmed(orderId),
+            reservations.release(orderId, { onlyIfExpired: false }),
+            reservations.confirm(orderId),
+          ]),
+        );
+
+        // Whatever the order of the three, each order ends in one final-looking state and the
+        // warehouse lost a unit only for the orders that stayed CONFIRMED
+        let confirmed = 0;
+        for (const orderId of orders) {
+          const statuses = await statusOf(orderId);
+          expect(statuses).toHaveLength(1);
+          expect(['CONFIRMED', 'RELEASED', 'RETURNED']).toContain(statuses[0]);
+          if (statuses[0] === 'CONFIRMED') confirmed++;
+        }
+        expect(await onHand('inv_sku_A')).toBe(100 - confirmed);
+      });
+    });
+
     describe('findExpiredOrderIds (AC-15)', () => {
       it('lists the orders that are RESERVED and past their expiry, oldest first, once each', async () => {
         await reserve(

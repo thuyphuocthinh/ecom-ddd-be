@@ -26,6 +26,7 @@ import {
   RepairInFlightHoldsCommand,
   ReservationMaintenance,
   ReserveStockCommand,
+  ReturnReservationCommand,
   StockRebuilder,
   type ReserveStockResult,
 } from './application/index.js';
@@ -801,6 +802,176 @@ describe('Inventory (Integration)', () => {
 
     const seedStockInPostgresOnly = (skuId: string, units: number) =>
       prisma.skuStock.create({ data: { skuId, onHand: units } });
+  });
+
+  describe('putting back stock that was already paid for (AC-25, AC-26)', () => {
+    const giveBackPaid = (orderId: string) =>
+      commands.execute(new ReturnReservationCommand(orderId));
+    const failureOf = async (promise: Promise<unknown>) => {
+      try {
+        await promise;
+      } catch (error: any) {
+        return error.code as string;
+      }
+      throw new Error('should have failed');
+    };
+
+    it('puts the units back into the warehouse and into Redis, so the numbers are as before the order', async () => {
+      await setStock(A, 5);
+      await setStock(B, 3);
+      await reserve('O1', [
+        { skuId: A, qty: 2 },
+        { skuId: B, qty: 1 },
+      ]);
+      await confirm('O1');
+      expect(await onHand(A)).toBe(3);
+      expect(await available(A)).toBe(3); // paid units are gone, not held
+
+      await giveBackPaid('O1');
+
+      expect(await statusOf('O1')).toEqual(['RETURNED', 'RETURNED']);
+      expect(await onHand(A)).toBe(5);
+      expect(await onHand(B)).toBe(3);
+      expect(await available(A)).toBe(5);
+      expect(await available(B)).toBe(3);
+      await expectConsistent(A);
+      await expectConsistent(B);
+    });
+
+    it('does nothing the second time, and ten returns at once put the units back once', async () => {
+      await setStock(A, 5);
+      await reserve('O1', [{ skuId: A, qty: 2 }]);
+      await confirm('O1');
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, () => giveBackPaid('O1')),
+      );
+      await giveBackPaid('O1');
+
+      expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+      expect(await onHand(A)).toBe(5);
+      expect(await available(A)).toBe(5);
+    });
+
+    it('is still right after Redis lost its numbers and they were rebuilt from Postgres', async () => {
+      await setStock(A, 5);
+      await reserve('O1', [{ skuId: A, qty: 2 }]);
+      await confirm('O1');
+      await giveBackPaid('O1');
+
+      await forgetRedis();
+      await rebuild(A);
+
+      expect(await available(A)).toBe(5); // onHand 5 minus nothing held
+    });
+
+    it('skips a SKU Redis has no number for, and the rebuild later gives the right number', async () => {
+      await setStock(A, 5);
+      await reserve('O1', [{ skuId: A, qty: 2 }]);
+      await confirm('O1');
+      await forgetRedis();
+
+      await giveBackPaid('O1');
+
+      expect(await onHand(A)).toBe(5);
+      expect(await available(A)).toBeNull(); // nothing was made up from the quantity alone
+      await rebuild(A);
+      expect(await available(A)).toBe(5);
+    });
+
+    it('still succeeds when Redis cannot take the units; Redis shows fewer units until a rebuild', async () => {
+      await setStock(A, 5);
+      await reserve('O1', [{ skuId: A, qty: 2 }]);
+      await confirm('O1');
+      vi.spyOn(store, 'giveBack').mockRejectedValueOnce(
+        new Error('redis down'),
+      );
+
+      await expect(giveBackPaid('O1')).resolves.toBeUndefined();
+
+      expect(await onHand(A)).toBe(5); // Postgres is the truth and has them back
+      expect(await available(A)).toBe(3); // the safe side: fewer than there are
+      await forgetRedis();
+      await rebuild(A);
+      expect(await available(A)).toBe(5);
+    });
+
+    it('turns away an order that was never paid (INV-008) and one that holds nothing (INV-003)', async () => {
+      await setStock(A, 5);
+      await reserve('O1', [{ skuId: A, qty: 2 }]);
+
+      expect(await failureOf(giveBackPaid('O1'))).toBe(
+        InventoryErrorCodes.RESERVATION_NOT_CONFIRMED.code,
+      );
+      expect(await failureOf(giveBackPaid('nope'))).toBe(
+        InventoryErrorCodes.RESERVATION_NOT_FOUND.code,
+      );
+      // nothing moved: the hold is still the hold
+      expect(await statusOf('O1')).toEqual(['RESERVED']);
+      expect(await onHand(A)).toBe(5);
+      expect(await available(A)).toBe(3);
+
+      await release('O1');
+      expect(await failureOf(giveBackPaid('O1'))).toBe(
+        InventoryErrorCodes.RESERVATION_NOT_CONFIRMED.code,
+      );
+      expect(await available(A)).toBe(5);
+    });
+
+    it('gives the order no way back in: holding or paying again after the return is refused (INV-006)', async () => {
+      await setStock(A, 5);
+      await reserve('O1', [{ skuId: A, qty: 2 }]);
+      await confirm('O1');
+      await giveBackPaid('O1');
+
+      expect(await failureOf(reserve('O1', [{ skuId: A, qty: 2 }]))).toBe(
+        InventoryErrorCodes.RESERVATION_RELEASED.code,
+      );
+      expect(await failureOf(confirm('O1'))).toBe(
+        InventoryErrorCodes.RESERVATION_RELEASED.code,
+      );
+      expect(await onHand(A)).toBe(5);
+      expect(await available(A)).toBe(5);
+    });
+
+    it('lets the freed units be bought by someone else', async () => {
+      await setStock(A, 1);
+      await reserve('O1', [{ skuId: A, qty: 1 }]);
+      await confirm('O1');
+      expect(await failureOf(reserve('O2', [{ skuId: A, qty: 1 }]))).toBe(
+        InventoryErrorCodes.OUT_OF_STOCK.code,
+      );
+
+      await giveBackPaid('O1');
+
+      await expect(
+        reserve('O2', [{ skuId: A, qty: 1 }]),
+      ).resolves.toBeDefined();
+      await expectConsistent(A);
+    });
+
+    it('keeps the books right when fifty paid orders are all cancelled at once', async () => {
+      await setStock(A, 100);
+      await rebuild(A);
+      const orders = Array.from({ length: 50 }, (_, i) => `PAID-${i}`);
+      for (const orderId of orders) {
+        await reserve(orderId, [{ skuId: A, qty: 1 }]);
+        await confirm(orderId);
+      }
+      expect(await onHand(A)).toBe(50);
+
+      const results = await Promise.allSettled(
+        orders.map((orderId) => giveBackPaid(orderId)),
+      );
+
+      expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+      expect(await onHand(A)).toBe(100);
+      expect(await available(A)).toBe(100);
+      for (const orderId of orders) {
+        expect(await statusOf(orderId)).toEqual(['RETURNED']);
+      }
+      await expectConsistent(A);
+    });
   });
 
   describe('the periodic round', () => {

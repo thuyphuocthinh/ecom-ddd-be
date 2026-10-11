@@ -7,6 +7,7 @@ import {
   ReservationStatus,
   type ConfirmOutcome,
   type IReservationRepository,
+  type ReturnResult,
   type StockItem,
 } from '../../domain/index.js';
 
@@ -14,6 +15,7 @@ const STATUS: Record<PrismaStatus, ReservationStatus> = {
   RESERVED: ReservationStatus.RESERVED,
   CONFIRMED: ReservationStatus.CONFIRMED,
   RELEASED: ReservationStatus.RELEASED,
+  RETURNED: ReservationStatus.RETURNED,
 };
 
 // `expiresAt` is a TIMESTAMP without time zone and Prisma stores UTC in it. `now()` is a
@@ -86,7 +88,7 @@ export class PrismaReservationRepository implements IReservationRepository {
         RETURNING "skuId", "qty"`;
 
       if (changed.length === 0) {
-        // Nothing was RESERVED: say what it is instead. Both answers are final states.
+        // Nothing was RESERVED: say what it is instead. A returned order counts as released: the hold is gone.
         const existing = await tx.reservation.findFirst({
           where: { orderId },
           select: { status: true },
@@ -126,6 +128,44 @@ export class PrismaReservationRepository implements IReservationRepository {
       SET "status" = 'RELEASED', "updatedAt" = ${DATABASE_NOW}
       WHERE "orderId" = ${orderId} AND "status" = 'RESERVED' ${onlyIfExpired}
       RETURNING "skuId", "qty"`;
+  }
+
+  async returnConfirmed(orderId: string): Promise<ReturnResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.$queryRaw<StockItem[]>`
+        UPDATE "Reservation"
+        SET "status" = 'RETURNED', "updatedAt" = ${DATABASE_NOW}
+        WHERE "orderId" = ${orderId} AND "status" = 'CONFIRMED'
+        RETURNING "skuId", "qty"`;
+
+      if (changed.length === 0) {
+        // Nothing was CONFIRMED: say what it is instead
+        const existing = await tx.reservation.findFirst({
+          where: { orderId },
+          select: { status: true },
+        });
+        if (!existing) return { kind: 'NOT_FOUND' };
+        return existing.status === PrismaStatus.RETURNED
+          ? { kind: 'ALREADY_RETURNED' }
+          : { kind: 'NOT_CONFIRMED' };
+      }
+
+      // The units go back into the warehouse. In the same transaction as the status change, so
+      // either both happen or none: no unit is ever counted twice or lost.
+      for (const line of changed) {
+        const put = await tx.$executeRaw`
+          UPDATE "SkuStock"
+          SET "onHand" = "onHand" + ${line.qty}, "updatedAt" = ${DATABASE_NOW}
+          WHERE "skuId" = ${line.skuId}`;
+        if (put !== 1) {
+          // A reservation cannot exist without a stock row (it needed one to be confirmed)
+          throw new Error(
+            `No stock row of ${line.skuId} to put the ${line.qty} units of order ${orderId} back into`,
+          );
+        }
+      }
+      return { kind: 'RETURNED', items: changed };
+    });
   }
 
   async findExpiredOrderIds(limit: number): Promise<string[]> {

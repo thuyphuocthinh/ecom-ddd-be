@@ -178,7 +178,10 @@ export class ReserveStockHandler implements ICommandHandler<
     existing: Reservation,
     requested: Reservation,
   ): ReserveStockResult {
-    if (existing.status === ReservationStatus.RELEASED) {
+    if (
+      existing.status === ReservationStatus.RELEASED ||
+      existing.status === ReservationStatus.RETURNED
+    ) {
       throw new InventoryDomainException(
         InventoryErrorCodes.RESERVATION_RELEASED,
       );

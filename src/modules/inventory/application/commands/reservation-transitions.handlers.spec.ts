@@ -8,6 +8,8 @@ import { ReleaseReservationCommand } from './release-reservation.command.js';
 import { ReleaseReservationHandler } from './release-reservation.handler.js';
 import { ReleaseExpiredReservationCommand } from './release-expired-reservation.command.js';
 import { ReleaseExpiredReservationHandler } from './release-expired-reservation.handler.js';
+import { ReturnReservationCommand } from './return-reservation.command.js';
+import { ReturnReservationHandler } from './return-reservation.handler.js';
 
 describe('ConfirmReservationHandler (AC-11)', () => {
   let reservationRepo: any;
@@ -135,5 +137,93 @@ describe('ReleaseReservationHandler and ReleaseExpiredReservationHandler', () =>
         releaser as unknown as ReservationReleaser,
       ).execute(new ReleaseReservationCommand('nope')),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('ReturnReservationHandler (AC-25, AC-26)', () => {
+  let reservationRepo: any;
+  let store: any;
+  let handler: ReturnReservationHandler;
+  let logged: string[];
+
+  beforeEach(() => {
+    logged = [];
+    vi.spyOn(Logger.prototype, 'error').mockImplementation((message: any) => {
+      logged.push(String(message));
+    });
+    reservationRepo = { returnConfirmed: vi.fn() };
+    store = { giveBack: vi.fn().mockResolvedValue(undefined) };
+    handler = new ReturnReservationHandler(reservationRepo, store);
+  });
+
+  const run = () => handler.execute(new ReturnReservationCommand('O1'));
+
+  it('adds the units it put back to the numbers in Redis, after Postgres has changed', async () => {
+    const items = [
+      { skuId: 'A', qty: 2 },
+      { skuId: 'B', qty: 1 },
+    ];
+    reservationRepo.returnConfirmed.mockResolvedValue({
+      kind: 'RETURNED',
+      items,
+    });
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(reservationRepo.returnConfirmed).toHaveBeenCalledWith('O1');
+    expect(store.giveBack).toHaveBeenCalledWith(items);
+  });
+
+  it('does not touch Redis for a repeat: nothing was put back this time', async () => {
+    reservationRepo.returnConfirmed.mockResolvedValue({
+      kind: 'ALREADY_RETURNED',
+    });
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(store.giveBack).not.toHaveBeenCalled();
+  });
+
+  it('refuses an order whose stock was never taken out, with INV-008, and does not touch Redis', async () => {
+    reservationRepo.returnConfirmed.mockResolvedValue({
+      kind: 'NOT_CONFIRMED',
+    });
+
+    await expect(run()).rejects.toMatchObject({
+      code: InventoryErrorCodes.RESERVATION_NOT_CONFIRMED.code,
+      status: 409,
+    });
+    expect(store.giveBack).not.toHaveBeenCalled();
+  });
+
+  it('refuses an order that holds nothing with INV-003', async () => {
+    reservationRepo.returnConfirmed.mockResolvedValue({ kind: 'NOT_FOUND' });
+
+    await expect(run()).rejects.toMatchObject({
+      code: InventoryErrorCodes.RESERVATION_NOT_FOUND.code,
+    });
+  });
+
+  it('still succeeds when Redis cannot take the units, and says which SKUs to rebuild', async () => {
+    reservationRepo.returnConfirmed.mockResolvedValue({
+      kind: 'RETURNED',
+      items: [
+        { skuId: 'A', qty: 2 },
+        { skuId: 'B', qty: 1 },
+      ],
+    });
+    store.giveBack.mockRejectedValue(new Error('redis down'));
+
+    // A retry would find nothing to return, so failing here would lose the units in Redis for good
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(logged.join('\n')).toContain('rebuild: A, B');
+  });
+
+  it('lets a Postgres failure through, so nothing is claimed to be returned', async () => {
+    reservationRepo.returnConfirmed.mockRejectedValue(new Error('db down'));
+
+    await expect(run()).rejects.toThrow('db down');
+    expect(store.giveBack).not.toHaveBeenCalled();
   });
 });

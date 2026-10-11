@@ -1,8 +1,22 @@
 import type { Reservation, StockItem } from '../entities/reservation.entity.js';
 
-/** What `confirm` found. Only CONFIRMED changed anything. */
+/**
+ * What `confirm` found. Only CONFIRMED changed anything. RELEASED also stands for an order whose
+ * confirmed stock was already returned: either way the hold is gone and cannot be confirmed.
+ */
 export type ConfirmOutcome =
   'CONFIRMED' | 'ALREADY_CONFIRMED' | 'RELEASED' | 'NOT_FOUND';
+
+/**
+ * What `returnConfirmed` found. Only RETURNED changed anything.
+ *  - ALREADY_RETURNED: a repeat of a return that is done.
+ *  - NOT_CONFIRMED: the order is RESERVED or RELEASED, so no stock was ever taken out to put back.
+ */
+export type ReturnResult =
+  | { kind: 'RETURNED'; items: StockItem[] }
+  | { kind: 'ALREADY_RETURNED' }
+  | { kind: 'NOT_CONFIRMED' }
+  | { kind: 'NOT_FOUND' };
 
 /** Thrown by `create` when the order already holds one of these SKUs (unique on order + SKU). */
 export class ReservationAlreadyExistsError extends Error {
@@ -38,6 +52,14 @@ export interface IReservationRepository {
     orderId: string,
     options: { onlyIfExpired: boolean },
   ): Promise<StockItem[]>;
+
+  /**
+   * The order was cancelled after it was paid: CONFIRMED becomes RETURNED and the units go back
+   * into the warehouse stock (`onHand`), in one transaction. Conditional on CONFIRMED, so doing it
+   * twice, or racing a confirm or a release, changes nothing the second time. Returns the lines it
+   * put back so the caller can add them to the number in Redis.
+   */
+  returnConfirmed(orderId: string): Promise<ReturnResult>;
 
   /** Orders still RESERVED and past their expiry, oldest first. */
   findExpiredOrderIds(limit: number): Promise<string[]>;

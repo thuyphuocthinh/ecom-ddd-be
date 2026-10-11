@@ -276,6 +276,17 @@ describe('ReserveStockHandler', () => {
       expect(store.hold).not.toHaveBeenCalled();
     });
 
+    it('never brings back an order whose paid stock was already put back (INV-006)', async () => {
+      reservationRepo.findByOrderId.mockResolvedValue(
+        stored(ReservationStatus.RETURNED),
+      );
+
+      await expect(reserve()).rejects.toMatchObject({
+        code: InventoryErrorCodes.RESERVATION_RELEASED.code,
+      });
+      expect(store.hold).not.toHaveBeenCalled();
+    });
+
     it('never brings back an order whose units were already given back (INV-006)', async () => {
       reservationRepo.findByOrderId.mockResolvedValue(
         stored(ReservationStatus.RELEASED),

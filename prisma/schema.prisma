@@ -96,11 +96,14 @@ model Sku {
 }
 
 // ReservationStatus: RESERVED = held for an unpaid order, CONFIRMED = paid (stock taken out of
-// SkuStock.onHand), RELEASED = cancelled or expired (stock given back). CONFIRMED and RELEASED are final.
+// SkuStock.onHand), RELEASED = cancelled or expired before it was paid (stock given back),
+// RETURNED = was CONFIRMED, then the order was cancelled before delivery and the stock put back into
+// SkuStock.onHand. RELEASED and RETURNED are final; CONFIRMED can only move on to RETURNED.
 enum ReservationStatus {
   RESERVED
   CONFIRMED
   RELEASED
+  RETURNED
 }
 
 // How many units of a SKU are physically in the warehouse. What can be sold right now is

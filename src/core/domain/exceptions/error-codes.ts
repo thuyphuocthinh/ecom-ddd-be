@@ -176,6 +176,12 @@ export const InventoryErrorCodes = {
       'The stock held for this order was already returned; create a new order',
     status: HttpStatus.CONFLICT,
   },
+  RESERVATION_NOT_CONFIRMED: {
+    code: 'INV-008',
+    message:
+      'The stock of this order was not taken out of the warehouse, so there is nothing to put back',
+    status: HttpStatus.CONFLICT,
+  },
   STOCK_UNAVAILABLE: {
     code: 'INV-007',
     message: 'Stock service is temporarily unavailable, please try again later',
