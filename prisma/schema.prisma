@@ -152,6 +152,7 @@ model User {
   credentials UserCredential[]
   sessions    Session[]
   addresses   Address[]
+  orders      Order[]
 }
 
 // A delivery address in a user's address book. At most 10 per user, and at most one with
@@ -288,4 +289,86 @@ model Ward {
   addresses Address[]
 
   @@index([provinceCode])
+}
+
+// OrderStatus: PENDING = placed, waiting to be paid (online) or to be confirmed (cash on delivery);
+// PAYMENT_PROCESSING = an online payment is running; CONFIRMED = paid or cash on delivery accepted, stock
+// taken out of the warehouse; SHIPPING, DELIVERED = on the way, handed over. CANCELLED = the customer
+// cancelled; EXPIRED = not paid in time (or the stock held for a cash-on-delivery order was lost).
+// DELIVERED, CANCELLED and EXPIRED are final. The allowed moves are in the orders module.
+enum OrderStatus {
+  PENDING
+  PAYMENT_PROCESSING
+  CONFIRMED
+  SHIPPING
+  DELIVERED
+  CANCELLED
+  EXPIRED
+}
+
+// ONLINE = paid before the goods leave; COD = cash on delivery
+enum PaymentMethod {
+  ONLINE
+  COD
+}
+
+// An order. Its id is derived from (user, idempotency key), so the same request always meets the
+// same row. A copy of what the customer bought and where it goes is kept in the order itself
+// (items, shippingAddress): changing a price or an address later never changes an order.
+// stockReturnPending = the order was cancelled after its stock had been taken out of the warehouse
+// and that stock has not been put back yet (cleared once it is).
+// Hand-written in the migration (Prisma cannot express them): CHECKs on total and version, and a
+// partial index on the orders whose stock is still to be put back.
+model Order {
+  id                 String        @id
+  userId             String
+  idempotencyKey     String        @db.VarChar(100)
+  paymentMethod      PaymentMethod
+  status             OrderStatus   @default(PENDING)
+  version            Int           @default(1)
+  stockReturnPending Boolean       @default(false)
+  total              Decimal       @db.Decimal(12, 2)
+  shippingAddress    Json
+  expiresAt          DateTime
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  user  User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  items OrderItem[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([status, expiresAt])
+}
+
+// One line of an order, as it was when the order was placed. skuId is plain text, NOT a foreign
+// key: the line must survive the SKU being deleted. Hand-written CHECKs: unitPrice, lineTotal >= 0, quantity > 0.
+model OrderItem {
+  id          String  @id
+  orderId     String
+  skuId       String
+  productName String  @db.VarChar(255)
+  thumbnail   String? @db.VarChar(500)
+  attributes  Json
+  unitPrice   Decimal @db.Decimal(12, 2)
+  quantity    Int
+  lineTotal   Decimal @db.Decimal(12, 2)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, skuId])
+}
+
+// Something that happened and must reach RabbitMQ (the transactional outbox): written in the SAME
+// transaction as the change it reports, sent later by a background process. seq keeps the order;
+// publishedAt is empty until the event has been sent. Hand-written in the migration: a partial
+// index on the rows not yet sent.
+model OutboxEvent {
+  id          String    @id
+  seq         BigInt    @unique @default(autoincrement())
+  type        String    @db.VarChar(100)
+  aggregateId String    @db.VarChar(100)
+  payload     Json
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
 }

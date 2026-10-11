@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { InventoryModule } from './modules/inventory/inventory.module.js';
 import { LocationsModule } from './modules/locations/locations.module.js';
 import { CartModule } from './modules/cart/cart.module.js';
+import { OrdersModule } from './modules/orders/orders.module.js';
 import { validateEnv } from './core/config/env.validation.js';
 import { resolveCorrelationId } from './core/utils/correlation-id.util.js';
 import { DatabaseModule } from './core/infrastructure/database/database.module.js';
@@ -17,6 +18,7 @@ import { RateLimitModule } from './core/infrastructure/redis/rate-limit/rate-lim
 import { LockModule } from './core/infrastructure/redis/lock/lock.module.js';
 import { TokenModule } from './core/infrastructure/redis/token/token.module.js';
 import { JobQueueModule } from './core/infrastructure/messaging/jobs/job-queue.module.js';
+import { EventBusModule } from './core/infrastructure/messaging/events/event-bus.module.js';
 import { EmailModule } from './core/infrastructure/email/email.module.js';
 import { ImageStorageModule } from './core/infrastructure/storage/image-storage.module.js';
 
@@ -38,6 +40,7 @@ import { ImageStorageModule } from './core/infrastructure/storage/image-storage.
     TokenModule,
     LockModule,
     JobQueueModule,
+    EventBusModule,
     EmailModule,
     ImageStorageModule,
     UsersModule,
@@ -46,6 +49,7 @@ import { ImageStorageModule } from './core/infrastructure/storage/image-storage.
     InventoryModule,
     LocationsModule,
     CartModule,
+    OrdersModule,
   ],
   controllers: [AppController],
 })

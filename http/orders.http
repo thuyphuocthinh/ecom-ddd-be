@@ -1,0 +1,200 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Đơn hàng (order) — test API bằng extension "REST Client" của VS Code (humao.rest-client).
+# Bấm "Send Request" ngay phía trên dòng GET/POST.
+#
+# Cần có sẵn (một lần, theo thứ tự):
+#   - Một tài khoản đã đăng ký (xem http/auth.http). Request 1 đăng nhập để lấy token.
+#   - Danh mục hành chính, sản phẩm và tồn kho:
+#       docker exec -i ecom_postgres psql -U root -d ecom_db < scripts/seed-administrative-units.sql
+#       docker exec -i ecom_postgres psql -U root -d ecom_db < scripts/seed-catalog.sql
+#       docker exec -i ecom_postgres psql -U root -d ecom_db < scripts/seed-stock.sql
+#   - Một địa chỉ giao hàng của chính bạn (xem http/addresses.http). Request 2 lấy địa chỉ mặc định.
+#   - Một tài khoản ADMIN cho các request giao hàng (xem http/admin.http cách cấp quyền bằng SQL;
+#     nhớ đăng nhập lại sau khi cấp). Đổi @adminEmail bên dưới.
+#
+# Cách đặt đơn: bỏ món vào giỏ (http/cart.http), rồi POST /orders với header Idempotency-Key.
+#   - Cùng một Idempotency-Key gửi lại thì KHÔNG tạo đơn mới: trả lại đúng đơn cũ, status 200 và
+#     header "Idempotency-Replayed: true". Muốn một đơn mới thì đổi key (8 đến 100 ký tự: A-Z a-z 0-9 _ -).
+#   - paymentMethod:
+#       ONLINE = trả tiền trước. Đơn ở PENDING, hàng được giữ 15 phút; không trả thì đơn tự EXPIRED
+#                (vòng quét chạy mỗi 60 giây, nên có thể trễ tới vài chục giây sau hạn).
+#                Việc trả tiền thật chưa làm (thuộc spec payment), nên đơn ONLINE chỉ có thể hủy hoặc hết hạn.
+#       COD    = trả tiền mặt khi nhận hàng. Đơn được CONFIRMED ngay, hàng được trừ khỏi kho.
+#   - Giá và địa chỉ trong đơn được CHỤP LẠI lúc đặt: đổi giá hoặc sửa địa chỉ sau đó không làm đơn đổi.
+#   - Hủy được khi PENDING hoặc CONFIRMED (chưa giao); hàng được hoàn về kho.
+#   - Giao hàng chỉ là giả lập: admin bấm ship rồi deliver bằng tay.
+#
+# Trạng thái: PENDING, PAYMENT_PROCESSING, CONFIRMED, SHIPPING, DELIVERED, CANCELLED, EXPIRED.
+# Lỗi hay gặp: ORD-001 hết hàng (kèm SKU thiếu), ORD-002 không thấy đơn (đơn của người khác cũng
+# trả y như vậy), ORD-003 giỏ rỗng, ORD-004 có món không còn bán, ORD-005 Idempotency-Key sai hoặc
+# thiếu, ORD-006 đơn không chuyển được sang trạng thái đó.
+# Giới hạn: POST /orders và POST /orders/:id/cancel 10 lần/phút/user; các request đọc 60 lần/phút/user.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@email = thuyphuocthinhtpt+1@gmail.com
+@adminEmail = thuyphuocthinhtpt+1@gmail.com
+@password = 123456Aa
+
+# Đổi key này cho mỗi đơn MỚI muốn tạo (request 4 và 5 dùng hai key khác nhau)
+@onlineKey = online-order-0001
+@codKey = cod-order-0001
+
+# Lấy tự động từ các response (không cần sửa)
+@accessToken = {{login.response.body.$.data.accessToken}}
+@adminToken = {{adminLogin.response.body.$.data.accessToken}}
+@addressId = {{addresses.response.body.$.data[0].id}}
+@orderId = {{placeOnline.response.body.$.data.id}}
+@codOrderId = {{placeCod.response.body.$.data.id}}
+
+
+### 1. Đăng nhập để lấy token (5 lần/15 phút/IP)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+
+### 2. Lấy địa chỉ giao hàng của mình (lấy địa chỉ đầu tiên làm @addressId)
+# @name addresses
+GET {{baseUrl}}/users/me/addresses
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Bỏ món vào giỏ trước khi đặt (xem thêm http/cart.http)
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "skuId": "seed_sku_tshirt_m",
+  "quantity": 2
+}
+
+
+### 4. Đặt đơn trả tiền trước (ONLINE) → 201, đơn PENDING, hàng được giữ, giỏ được dọn
+# @name placeOnline
+POST {{baseUrl}}/orders
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{onlineKey}}
+Content-Type: application/json
+
+{
+  "addressId": "{{addressId}}",
+  "paymentMethod": "ONLINE"
+}
+
+
+### 5. Gửi lại y hệt request 4 (cùng key) → 200 + Idempotency-Replayed: true, đúng đơn cũ, không giữ hàng thêm
+POST {{baseUrl}}/orders
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{onlineKey}}
+Content-Type: application/json
+
+{
+  "addressId": "{{addressId}}",
+  "paymentMethod": "ONLINE"
+}
+
+
+### 6. Đặt đơn trả tiền mặt (COD): bỏ món vào giỏ lại (request 3) rồi gửi → 201, đơn CONFIRMED ngay
+# @name placeCod
+POST {{baseUrl}}/orders
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{codKey}}
+Content-Type: application/json
+
+{
+  "addressId": "{{addressId}}",
+  "paymentMethod": "COD"
+}
+
+
+### 7. Danh sách đơn của mình, mới nhất trước. limit 1 đến 50 (mặc định 20); trang sau: thêm &cursor=<meta.nextCursor>
+GET {{baseUrl}}/orders?limit=10
+Authorization: Bearer {{accessToken}}
+
+
+### 8. Chi tiết một đơn (đơn của người khác hoặc không có đều → 404 ORD-002)
+GET {{baseUrl}}/orders/{{orderId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 9. Hủy đơn khi còn PENDING hoặc CONFIRMED → 200, hàng được hoàn về kho. Hủy lần nữa → 409 ORD-006
+POST {{baseUrl}}/orders/{{orderId}}/cancel
+Authorization: Bearer {{accessToken}}
+
+
+### 10. Thiếu Idempotency-Key → 400 ORD-005 (key quá ngắn, có dấu cách hay ký tự lạ cũng vậy)
+POST {{baseUrl}}/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "addressId": "{{addressId}}",
+  "paymentMethod": "ONLINE"
+}
+
+
+### 11. Body sai (paymentMethod không có, trường lạ như userId hay total) → 400 VAL-001
+POST {{baseUrl}}/orders
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: bad-body-0001
+Content-Type: application/json
+
+{
+  "addressId": "{{addressId}}",
+  "paymentMethod": "CRYPTO",
+  "userId": "someone-else"
+}
+
+
+### 12. Giỏ rỗng → 409 ORD-003 (chạy khi giỏ đã được dọn)
+POST {{baseUrl}}/orders
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: empty-cart-0001
+Content-Type: application/json
+
+{
+  "addressId": "{{addressId}}",
+  "paymentMethod": "ONLINE"
+}
+
+
+### 13. Hết hàng → 409 ORD-001 kèm SKU thiếu và số còn lại (seed_sku_flash chỉ còn 10: bỏ 11 cái vào giỏ qua PUT, cart.http request 5)
+POST {{baseUrl}}/orders
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: out-of-stock-0001
+Content-Type: application/json
+
+{
+  "addressId": "{{addressId}}",
+  "paymentMethod": "ONLINE"
+}
+
+
+# ─── Admin: giao hàng (giả lập) ───────────────────────────────────────────────
+
+### 14. Admin đăng nhập (5 lần/15 phút/IP)
+# @name adminLogin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "{{password}}"
+}
+
+
+### 15. Admin giao đơn COD đã CONFIRMED (request 6): CONFIRMED → SHIPPING. Người không phải admin → 403
+POST {{baseUrl}}/admin/orders/{{codOrderId}}/ship
+Authorization: Bearer {{adminToken}}
+
+
+### 16. Admin đánh dấu đã giao: SHIPPING → DELIVERED. Sai trạng thái → 409 ORD-006, không có đơn → 404 ORD-002
+POST {{baseUrl}}/admin/orders/{{codOrderId}}/deliver
+Authorization: Bearer {{adminToken}}

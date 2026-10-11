@@ -23,10 +23,10 @@ const OPTIONAL_POSITIVE_INT_VARS = [
   'REFRESH_TOKEN_TTL_SECONDS',
   'SESSION_ABSOLUTE_TTL_SECONDS',
 ];
-// Inventory settings are whole numbers too. The maintenance interval may be 0: that switches the
-// periodic sweep off (tests run it by hand). The hold time is at most 7 days because the
-// "give the stock back" timer is a delayed job, and a job may be delayed by 7 days at most.
-const INVENTORY_INT_VARS = [
+// Inventory and order settings are whole numbers too. A sweep or relay interval may be 0: that
+// switches it off (tests run it by hand). The hold time is at most 7 days because the "give the
+// stock back" timer is a delayed job, and a job may be delayed by 7 days at most.
+const INT_SETTING_VARS = [
   {
     name: 'RESERVATION_TTL_MINUTES',
     unit: 'minutes',
@@ -41,6 +41,24 @@ const INVENTORY_INT_VARS = [
   },
   {
     name: 'INVENTORY_MAINTENANCE_INTERVAL_SECONDS',
+    unit: 'seconds',
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+  },
+  {
+    name: 'ORDER_OUTBOX_INTERVAL_MS',
+    unit: 'milliseconds',
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+  },
+  {
+    name: 'ORDER_OUTBOX_BATCH_SIZE',
+    unit: 'events',
+    min: 1,
+    max: 1000,
+  },
+  {
+    name: 'ORDER_MAINTENANCE_INTERVAL_SECONDS',
     unit: 'seconds',
     min: 0,
     max: Number.MAX_SAFE_INTEGER,
@@ -148,7 +166,7 @@ export function validateEnv(
     }
   }
 
-  for (const { name, unit, min, max } of INVENTORY_INT_VARS) {
+  for (const { name, unit, min, max } of INT_SETTING_VARS) {
     if (config[name] === undefined) continue;
     const value = Number(config[name]);
     if (!Number.isInteger(value) || value < min || value > max) {

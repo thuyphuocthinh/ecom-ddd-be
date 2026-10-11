@@ -43,6 +43,11 @@ export const StorageErrorCodes = {
 };
 
 export const OrderErrorCodes = {
+  DOMAIN_EXCEPTION: {
+    code: 'ORD-000',
+    message: 'Order domain exception',
+    status: HttpStatus.BAD_REQUEST,
+  },
   OUT_OF_STOCK: {
     code: 'ORD-001',
     message: 'Not enough stock available',
@@ -52,6 +57,27 @@ export const OrderErrorCodes = {
     code: 'ORD-002',
     message: 'Order not found',
     status: HttpStatus.NOT_FOUND,
+  },
+  EMPTY_CART: {
+    code: 'ORD-003',
+    message: 'Your cart is empty',
+    status: HttpStatus.CONFLICT,
+  },
+  ITEM_UNAVAILABLE: {
+    code: 'ORD-004',
+    message: 'Some items in your cart are no longer on sale',
+    status: HttpStatus.CONFLICT,
+  },
+  INVALID_IDEMPOTENCY_KEY: {
+    code: 'ORD-005',
+    message:
+      'The Idempotency-Key header is required: 8 to 100 characters from A-Z a-z 0-9 _ -',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  INVALID_STATE_TRANSITION: {
+    code: 'ORD-006',
+    message: 'The order cannot move to that status from where it is now',
+    status: HttpStatus.CONFLICT,
   },
 };
 

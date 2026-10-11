@@ -357,6 +357,44 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('Order settings', () => {
+    it('are optional: the defaults apply when none is set', () => {
+      expect(() => validateEnv({ ...VALID })).not.toThrow();
+    });
+
+    it('accepts whole numbers (env values are strings), and 0 to switch a loop off', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          ORDER_OUTBOX_INTERVAL_MS: '1000',
+          ORDER_OUTBOX_BATCH_SIZE: '50',
+          ORDER_MAINTENANCE_INTERVAL_SECONDS: '60',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          ORDER_OUTBOX_INTERVAL_MS: '0',
+          ORDER_MAINTENANCE_INTERVAL_SECONDS: '0',
+        }),
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['ORDER_OUTBOX_INTERVAL_MS', '-1'],
+      ['ORDER_OUTBOX_INTERVAL_MS', '1.5'],
+      ['ORDER_OUTBOX_INTERVAL_MS', 'often'],
+      ['ORDER_OUTBOX_BATCH_SIZE', '0'],
+      ['ORDER_OUTBOX_BATCH_SIZE', '1001'],
+      ['ORDER_OUTBOX_BATCH_SIZE', '2.5'],
+      ['ORDER_MAINTENANCE_INTERVAL_SECONDS', '-5'],
+    ])('rejects %s=%s', (name, value) => {
+      expect(() => validateEnv({ ...VALID, [name]: value })).toThrow(
+        new RegExp(name),
+      );
+    });
+  });
+
   describe('Cloudinary (profile pictures)', () => {
     const ALL = {
       ...VALID,
