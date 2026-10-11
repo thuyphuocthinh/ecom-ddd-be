@@ -4,6 +4,9 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: ecom_postgres
+    # The application opens up to 100 connections per copy (DATABASE_POOL_MAX); the default limit of 100
+    # would be used up by one copy. A connection pooler (PgBouncer) is the way to lift this later.
+    command: postgres -c max_connections=200
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: rootpassword

@@ -366,6 +366,8 @@ describe('validateEnv', () => {
       expect(() =>
         validateEnv({
           ...VALID,
+          DATABASE_POOL_MAX: '100',
+          DATABASE_POOL_CONNECTION_TIMEOUT_MS: '5000',
           ORDER_OUTBOX_INTERVAL_MS: '1000',
           ORDER_OUTBOX_BATCH_SIZE: '50',
           ORDER_MAINTENANCE_INTERVAL_SECONDS: '60',
@@ -381,6 +383,11 @@ describe('validateEnv', () => {
     });
 
     it.each([
+      ['DATABASE_POOL_MAX', '0'],
+      ['DATABASE_POOL_MAX', '1001'],
+      ['DATABASE_POOL_MAX', '2.5'],
+      ['DATABASE_POOL_CONNECTION_TIMEOUT_MS', '-1'],
+      ['DATABASE_POOL_CONNECTION_TIMEOUT_MS', 'soon'],
       ['ORDER_OUTBOX_INTERVAL_MS', '-1'],
       ['ORDER_OUTBOX_INTERVAL_MS', '1.5'],
       ['ORDER_OUTBOX_INTERVAL_MS', 'often'],
