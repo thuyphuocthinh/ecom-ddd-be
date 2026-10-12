@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import * as amqp from 'amqplib';
@@ -22,6 +22,15 @@ import { RabbitMqEventBus } from '../src/core/infrastructure/messaging/events/ra
  */
 const NAMESPACE = `e2e-${randomUUID().slice(0, 8)}.`;
 const EXCHANGE = `${NAMESPACE}events`;
+// The queues of the listeners the tests below start (deleted at the end, with their dead-letter queues)
+const LISTENERS = [
+  'sub.alpha',
+  'sub.beta',
+  'sub.payments-only',
+  'sub.failing',
+  'sub.raw',
+  'sub.crashing',
+];
 const RABBITMQ_URL =
   process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5672';
 
@@ -65,6 +74,18 @@ describe('Event bus on RabbitMQ (e2e)', () => {
     everything: `${NAMESPACE}test.everything`,
   };
 
+  // A missing queue makes the broker close the channel that asked, so ask on a throwaway channel
+  const consumers = async (queue: string) => {
+    const probe = await admin.createChannel();
+    probe.on('error', () => undefined);
+    try {
+      return (await probe.checkQueue(queue)).consumerCount;
+    } catch {
+      return 0;
+    } finally {
+      await probe.close().catch(() => undefined);
+    }
+  };
   const depth = async (queue: string) =>
     (await adminChannel.checkQueue(queue)).messageCount;
   const take = async (queue: string) => {
@@ -131,6 +152,12 @@ describe('Event bus on RabbitMQ (e2e)', () => {
     };
     for (const queue of Object.values(queues)) {
       await remove((channel) => channel.deleteQueue(queue));
+    }
+    for (const name of LISTENERS) {
+      await remove((channel) => channel.deleteQueue(`${NAMESPACE}${name}`));
+      await remove((channel) =>
+        channel.deleteQueue(`${NAMESPACE}${name}.dead`),
+      );
     }
     await remove((channel) => channel.deleteExchange(EXCHANGE));
     await admin.close().catch(() => undefined);
@@ -275,4 +302,162 @@ describe('Event bus on RabbitMQ (e2e)', () => {
     await bus.publish(event('order.created'));
     expect(await depth(queues.orders)).toBe(1);
   }, 40_000);
+  describe('listeners (subscribe)', () => {
+    const ids = (seen: IntegrationEvent[]) => seen.map((e) => e.id);
+    const queueOf = (name: string) => `${NAMESPACE}${name}`;
+
+    it('gives every listener its own copy of each event that matches its pattern, and none of the others (AC-14)', async () => {
+      const alpha: IntegrationEvent[] = [];
+      const beta: IntegrationEvent[] = [];
+      const paymentsOnly: IntegrationEvent[] = [];
+      bus.subscribe({ name: 'sub.alpha', pattern: 'order.*' }, async (e) => {
+        alpha.push(e);
+      });
+      bus.subscribe({ name: 'sub.beta', pattern: 'order.*' }, async (e) => {
+        beta.push(e);
+      });
+      bus.subscribe(
+        { name: 'sub.payments-only', pattern: 'payment.#' },
+        async (e) => {
+          paymentsOnly.push(e);
+        },
+      );
+      for (const name of ['sub.alpha', 'sub.beta', 'sub.payments-only']) {
+        await until(
+          async () => (await consumers(queueOf(name))) === 1,
+          `the listener ${name} to be consuming`,
+        );
+      }
+
+      await bus.publish(event('order.created', { id: 'L1' }));
+      await bus.publish(event('payment.succeeded', { id: 'L2' }));
+      await bus.publish(event('order.status_changed', { id: 'L3' }));
+
+      await until(
+        () =>
+          alpha.length === 2 && beta.length === 2 && paymentsOnly.length === 1,
+        'the events to arrive',
+      );
+      expect(ids(alpha)).toEqual(['L1', 'L3']);
+      expect(ids(beta)).toEqual(['L1', 'L3']);
+      expect(ids(paymentsOnly)).toEqual(['L2']);
+      expect(alpha[0]).toEqual({
+        id: 'L1',
+        name: 'order.created',
+        occurredAt: expect.any(Date),
+        data: { note: 'hello' },
+      });
+      // Handled and acknowledged: nothing waits in any of the queues
+      await until(
+        async () => (await depth(queueOf('sub.alpha'))) === 0,
+        'the queue to be empty',
+      );
+      expect(await depth(queueOf('sub.beta'))).toBe(0);
+    });
+
+    it('moves an event to the dead-letter queue when its handler throws, once, without a retry loop (AC-14)', async () => {
+      let calls = 0;
+      bus.subscribe({ name: 'sub.failing', pattern: 'failing.*' }, async () => {
+        calls++;
+        throw new Error('cannot handle it');
+      });
+      await until(
+        async () => (await consumers(queueOf('sub.failing'))) === 1,
+        'the listener to be consuming',
+      );
+
+      await bus.publish(event('failing.thing', { id: 'F1' }));
+
+      await until(
+        async () => (await depth(`${queueOf('sub.failing')}.dead`)) === 1,
+        'the event in the dead-letter queue',
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(calls).toBe(1);
+      expect(await depth(queueOf('sub.failing'))).toBe(0);
+      const dead = await take(`${queueOf('sub.failing')}.dead`);
+      expect(JSON.parse(dead!.content.toString()).id).toBe('F1');
+      expect(dead!.properties.messageId).toBe('F1');
+    });
+
+    it('moves a message that is not an event to the dead-letter queue without calling the handler (AC-14)', async () => {
+      const handler = vi.fn(async () => undefined);
+      bus.subscribe({ name: 'sub.raw', pattern: 'raw.*' }, handler);
+      await until(
+        async () => (await consumers(queueOf('sub.raw'))) === 1,
+        'the listener to be consuming',
+      );
+
+      adminChannel.publish(
+        EXCHANGE,
+        'raw.garbage',
+        Buffer.from('this is not JSON'),
+      );
+
+      await until(
+        async () => (await depth(`${queueOf('sub.raw')}.dead`)) === 1,
+        'the message in the dead-letter queue',
+      );
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('delivers an event again to the listener when the connection is lost in the middle of its handler (acknowledged only after it is done), and keeps listening after reconnecting (AC-14)', async () => {
+      const rabbit = moduleRef.get(RabbitMQService);
+      const seen: string[] = [];
+      let release!: () => void;
+      const stuck = new Promise<void>((resolve) => (release = resolve));
+      bus.subscribe(
+        { name: 'sub.crashing', pattern: 'crashing.*' },
+        async (e) => {
+          seen.push(e.id);
+          if (seen.length === 1) await stuck; // the first delivery never finishes
+        },
+      );
+      await until(
+        async () => (await consumers(queueOf('sub.crashing'))) === 1,
+        'the listener to be consuming',
+      );
+      await bus.publish(event('crashing.thing', { id: 'C1' }));
+      await until(() => seen.length === 1, 'the handler to start');
+
+      // The connection drops while the handler is working: the event was not acknowledged
+      const connection = (rabbit as any).connection as amqp.ChannelModel;
+      const goodUrl = process.env.RABBITMQ_URL;
+      process.env.RABBITMQ_URL = 'amqp://admin:admin@localhost:5999';
+      (connection as any).connection.stream.destroy(
+        new Error('connection cut by the test'),
+      );
+      await until(
+        () => !rabbit.isConnected(),
+        'the connection to be noticed as lost',
+      );
+      process.env.RABBITMQ_URL = goodUrl;
+      await until(() => rabbit.isConnected(), 'the reconnection', 15_000);
+
+      // The broker gives the same event again, to the listener that came back
+      await until(
+        () => seen.length === 2,
+        'the event to be delivered again',
+        15_000,
+      );
+      expect(seen).toEqual(['C1', 'C1']);
+      await until(
+        async () => (await depth(queueOf('sub.crashing'))) === 0,
+        'the queue to be empty',
+      );
+      // And new events still arrive
+      await bus.publish(event('crashing.thing', { id: 'C2' }));
+      await until(() => seen.includes('C2'), 'the next event');
+      release(); // let the first, abandoned handler finish so shutdown does not wait for it
+    }, 60_000);
+
+    it('refuses a listener name that is already used', () => {
+      expect(() =>
+        bus.subscribe(
+          { name: 'sub.alpha', pattern: '#' },
+          async () => undefined,
+        ),
+      ).toThrow(/already exists/);
+    });
+  });
 });
