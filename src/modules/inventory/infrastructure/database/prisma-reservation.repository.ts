@@ -6,6 +6,7 @@ import {
   ReservationAlreadyExistsError,
   ReservationStatus,
   type ConfirmOutcome,
+  type ExtendResult,
   type IReservationRepository,
   type ReturnResult,
   type StockItem,
@@ -166,6 +167,25 @@ export class PrismaReservationRepository implements IReservationRepository {
       }
       return { kind: 'RETURNED', items: changed };
     });
+  }
+
+  async extend(orderId: string, seconds: number): Promise<ExtendResult> {
+    const extended = await this.prisma.$queryRaw<{ expiresAt: Date }[]>`
+      UPDATE "Reservation"
+      SET "expiresAt" = GREATEST("expiresAt", ${DATABASE_NOW} + make_interval(secs => ${seconds})),
+          "updatedAt" = ${DATABASE_NOW}
+      WHERE "orderId" = ${orderId} AND "status" = 'RESERVED' AND "expiresAt" > ${DATABASE_NOW}
+      RETURNING "expiresAt"`;
+    if (extended.length > 0) {
+      // Every line of an order is held together, so they all share one expiry
+      const latest = Math.max(
+        ...extended.map((row) => row.expiresAt.getTime()),
+      );
+      return { kind: 'EXTENDED', expiresAt: new Date(latest) };
+    }
+    return (await this.existsForOrder(orderId))
+      ? { kind: 'NOT_EXTENDABLE' }
+      : { kind: 'NOT_FOUND' };
   }
 
   async findExpiredOrderIds(limit: number): Promise<string[]> {

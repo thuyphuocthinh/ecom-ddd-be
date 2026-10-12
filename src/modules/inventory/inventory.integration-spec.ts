@@ -20,6 +20,7 @@ import { InventoryModule } from './inventory.module.js';
 import { inventoryConfig, type InventoryConfig } from './inventory.config.js';
 import {
   ConfirmReservationCommand,
+  ExtendReservationCommand,
   ReleaseExpiredReservationCommand,
   ReleaseExpiredReservationsCommand,
   ReleaseReservationCommand,
@@ -28,6 +29,7 @@ import {
   ReserveStockCommand,
   ReturnReservationCommand,
   StockRebuilder,
+  type ExtendReservationResult,
   type ReserveStockResult,
 } from './application/index.js';
 import type {
@@ -971,6 +973,72 @@ describe('Inventory (Integration)', () => {
         expect(await statusOf(orderId)).toEqual(['RETURNED']);
       }
       await expectConsistent(A);
+    });
+  });
+
+  describe('holding the stock longer for someone who is paying (AC-27)', () => {
+    it('moves the expiry forward, leaves Redis alone, and the old timer and the sweep give nothing back until the new time', async () => {
+      await setStock(A, 10);
+      await reserve('O1', [{ skuId: A, qty: 3 }]);
+      await rebuild(A);
+      expect(await available(A)).toBe(7);
+      const before = (await rowsOf('O1'))[0].expiresAt.getTime();
+
+      const result = await commands.execute<
+        ExtendReservationCommand,
+        ExtendReservationResult
+      >(new ExtendReservationCommand('O1', 7200));
+
+      expect(result.orderId).toBe('O1');
+      expect(result.expiresAt.getTime()).toBeGreaterThan(before);
+      expect(
+        Math.abs(result.expiresAt.getTime() - (Date.now() + 7_200_000)),
+      ).toBeLessThan(10_000);
+      expect(await available(A)).toBe(7); // Redis already counts the units as held
+      // The timer that was set for the old expiry fires: the hold has not expired, so nothing happens
+      await commands.execute(new ReleaseExpiredReservationCommand('O1'));
+      await commands.execute(new ReleaseExpiredReservationsCommand());
+      expect(await statusOf('O1')).toEqual(['RESERVED']);
+      expect(await available(A)).toBe(7);
+
+      // When the new expiry comes, the sweep gives the units back
+      await expire('O1');
+      await commands.execute(new ReleaseExpiredReservationsCommand());
+      expect(await statusOf('O1')).toEqual(['RELEASED']);
+      expect(await available(A)).toBe(10);
+    });
+
+    it('refuses with INV-009 a hold that was given back, paid or expired, and INV-003 for an order that holds nothing', async () => {
+      await setStock(A, 10);
+      await reserve('RELEASED', [{ skuId: A, qty: 1 }]);
+      await release('RELEASED');
+      await reserve('PAID', [{ skuId: A, qty: 1 }]);
+      await confirm('PAID');
+      await reserve('LATE', [{ skuId: A, qty: 1 }]);
+      await expire('LATE');
+      const extend = (orderId: string) =>
+        commands.execute(new ExtendReservationCommand(orderId, 900));
+
+      for (const orderId of ['RELEASED', 'PAID', 'LATE']) {
+        await expect(extend(orderId)).rejects.toMatchObject({
+          code: 'INV-009',
+        });
+      }
+      await expect(extend('NEVER')).rejects.toMatchObject({ code: 'INV-003' });
+      await expect(
+        commands.execute(new ExtendReservationCommand('O1', 0)),
+      ).rejects.toMatchObject({ code: 'INV-002' });
+    });
+
+    it('lets the payment finish: extend, then confirm, and the units leave the warehouse once', async () => {
+      await setStock(A, 10);
+      await reserve('O1', [{ skuId: A, qty: 2 }]);
+      await commands.execute(new ExtendReservationCommand('O1', 900));
+
+      await confirm('O1');
+
+      expect(await statusOf('O1')).toEqual(['CONFIRMED']);
+      expect(await onHand(A)).toBe(8);
     });
   });
 

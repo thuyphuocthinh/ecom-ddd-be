@@ -18,6 +18,16 @@ export type ReturnResult =
   | { kind: 'NOT_CONFIRMED' }
   | { kind: 'NOT_FOUND' };
 
+/**
+ * What `extend` found. Only EXTENDED changed anything.
+ *  - NOT_EXTENDABLE: the order is not RESERVED any more (released, confirmed, returned), or its
+ *    hold is already past its expiry by the database clock.
+ */
+export type ExtendResult =
+  | { kind: 'EXTENDED'; expiresAt: Date }
+  | { kind: 'NOT_EXTENDABLE' }
+  | { kind: 'NOT_FOUND' };
+
 /** Thrown by `create` when the order already holds one of these SKUs (unique on order + SKU). */
 export class ReservationAlreadyExistsError extends Error {
   constructor(orderId: string) {
@@ -60,6 +70,14 @@ export interface IReservationRepository {
    * put back so the caller can add them to the number in Redis.
    */
   returnConfirmed(orderId: string): Promise<ReturnResult>;
+
+  /**
+   * Holds the units of a RESERVED order until at least `seconds` from now (database clock): every
+   * line gets `expiresAt = max(expiresAt, now + seconds)`, so a hold is never shortened. One
+   * conditional update (`WHERE status = 'RESERVED' AND expiresAt > now`), so it cannot revive a
+   * hold that a release or the expiry got to first. Redis is not touched.
+   */
+  extend(orderId: string, seconds: number): Promise<ExtendResult>;
 
   /** Orders still RESERVED and past their expiry, oldest first. */
   findExpiredOrderIds(limit: number): Promise<string[]>;

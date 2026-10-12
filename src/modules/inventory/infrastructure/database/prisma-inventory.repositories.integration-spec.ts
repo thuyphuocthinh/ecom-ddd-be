@@ -531,6 +531,172 @@ describe('Inventory repositories (Integration)', () => {
       });
     });
 
+    describe('extend (AC-27)', () => {
+      const expiryOf = async (orderId: string) =>
+        (
+          await prisma.reservation.findMany({
+            where: { orderId },
+            select: { expiresAt: true },
+          })
+        ).map((row) => row.expiresAt.getTime());
+      // The database clock can differ from this machine's by a second or so
+      const NEAR = 10_000;
+
+      it('holds the units until that many seconds from now, when that is later than the hold', async () => {
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }], FUTURE());
+
+        const result = await reservations.extend('O1', 3600);
+
+        expect(result.kind).toBe('EXTENDED');
+        const expected = Date.now() + 3_600_000;
+        const [stored] = await expiryOf('O1');
+        expect(Math.abs(stored - expected)).toBeLessThan(NEAR);
+        expect(
+          Math.abs(
+            (result as { expiresAt: Date }).expiresAt.getTime() - expected,
+          ),
+        ).toBeLessThan(NEAR);
+      });
+
+      it('never shortens a hold', async () => {
+        const original = new Date(Date.now() + 3_600_000);
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }], original);
+
+        const result = await reservations.extend('O1', 60);
+
+        expect(result.kind).toBe('EXTENDED');
+        expect(await expiryOf('O1')).toEqual([original.getTime()]);
+      });
+
+      it('gives every line of the order the same new expiry', async () => {
+        await reserve(
+          'O1',
+          [
+            { skuId: 'inv_sku_A', qty: 1 },
+            { skuId: 'inv_sku_B', qty: 2 },
+          ],
+          FUTURE(),
+        );
+
+        await reservations.extend('O1', 1800);
+
+        const expiries = await expiryOf('O1');
+        expect(expiries).toHaveLength(2);
+        expect(expiries[0]).toBe(expiries[1]);
+      });
+
+      it('does not touch the status, the units held, or any other order', async () => {
+        await prisma.skuStock.create({
+          data: { skuId: 'inv_sku_A', onHand: 10 },
+        });
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 2 }], FUTURE());
+        const other = new Date(Date.now() + 100_000);
+        await reserve('O2', [{ skuId: 'inv_sku_A', qty: 3 }], other);
+
+        await reservations.extend('O1', 3600);
+
+        expect(await statusOf('O1')).toEqual(['RESERVED']);
+        expect(await expiryOf('O2')).toEqual([other.getTime()]);
+        expect(await stock.getSnapshot('inv_sku_A')).toEqual({
+          onHand: 10,
+          reserved: 5,
+        });
+      });
+
+      it('can be repeated, and the expiry only ever moves forward', async () => {
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }], FUTURE());
+
+        await reservations.extend('O1', 3600);
+        const [first] = await expiryOf('O1');
+        await reservations.extend('O1', 60);
+        const [second] = await expiryOf('O1');
+        await reservations.extend('O1', 7200);
+        const [third] = await expiryOf('O1');
+
+        expect(second).toBe(first);
+        expect(third).toBeGreaterThan(first);
+      });
+
+      it('ten at the same moment all succeed and agree on a time', async () => {
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }], FUTURE());
+
+        const results = await Promise.all(
+          Array.from({ length: 10 }, () => reservations.extend('O1', 1800)),
+        );
+
+        expect(results.every((r) => r.kind === 'EXTENDED')).toBe(true);
+        const [stored] = await expiryOf('O1');
+        expect(Math.abs(stored - (Date.now() + 1_800_000))).toBeLessThan(NEAR);
+      });
+
+      it.each([
+        [
+          'released',
+          async () => reservations.release('O1', { onlyIfExpired: false }),
+        ],
+        ['confirmed (paid)', async () => reservations.confirm('O1')],
+        [
+          'returned',
+          async () => {
+            await reservations.confirm('O1');
+            await reservations.returnConfirmed('O1');
+          },
+        ],
+      ])(
+        'refuses an order that is %s, and changes nothing',
+        async (_, prepare) => {
+          await prisma.skuStock.create({
+            data: { skuId: 'inv_sku_A', onHand: 10 },
+          });
+          const original = FUTURE();
+          await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }], original);
+          await prepare();
+
+          const result = await reservations.extend('O1', 3600);
+
+          expect(result).toEqual({ kind: 'NOT_EXTENDABLE' });
+          expect(await expiryOf('O1')).toEqual([original.getTime()]);
+        },
+      );
+
+      it('refuses a hold that is already past its expiry by the database clock, and does not bring it back', async () => {
+        const past = new Date(Date.now() - EXPIRED_AGO);
+        await reserve('O1', [{ skuId: 'inv_sku_A', qty: 1 }], past);
+
+        const result = await reservations.extend('O1', 3600);
+
+        expect(result).toEqual({ kind: 'NOT_EXTENDABLE' });
+        expect(await expiryOf('O1')).toEqual([past.getTime()]);
+        expect(await reservations.findExpiredOrderIds(10)).toEqual(['O1']);
+      });
+
+      it('says there is nothing to extend for an order that holds nothing', async () => {
+        expect(await reservations.extend('NEVER', 3600)).toEqual({
+          kind: 'NOT_FOUND',
+        });
+      });
+
+      it('an extension and a release at the same moment: whichever comes second finds the other done', async () => {
+        for (let i = 0; i < 20; i++) {
+          const orderId = `RACE-${i}`;
+          await reserve(orderId, [{ skuId: 'inv_sku_A', qty: 1 }], FUTURE());
+
+          const [extended] = await Promise.all([
+            reservations.extend(orderId, 3600),
+            reservations.release(orderId, { onlyIfExpired: false }),
+          ]);
+
+          // The release always happens; the extension either came first or was refused
+          expect(await statusOf(orderId)).toEqual(['RELEASED']);
+          expect(['EXTENDED', 'NOT_EXTENDABLE']).toContain(extended.kind);
+          // Once released, a later extension is refused however far ahead the expiry now is
+          expect(await reservations.extend(orderId, 3600)).toEqual({
+            kind: 'NOT_EXTENDABLE',
+          });
+        }
+      });
+    });
+
     describe('findExpiredOrderIds (AC-15)', () => {
       it('lists the orders that are RESERVED and past their expiry, oldest first, once each', async () => {
         await reserve(
