@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Thanh toán (payment) — test API bằng extension "REST Client" của VS Code (humao.rest-client).
+# Bấm "Send Request" ngay phía trên dòng GET/POST.
+#
+# Cần có sẵn: làm xong http/orders.http tới bước đặt đơn ONLINE (đơn ở PENDING). Đơn của bạn là @orderId.
+# Mọi thứ chạy với CỔNG GIẢ (PAYMENT_GATEWAY=fake): "cổng thanh toán" nằm ngay trong ứng dụng.
+#
+# Luồng:
+#   1. Bắt đầu trả (request 2): đơn sang PAYMENT_PROCESSING, hàng được giữ thêm PAYMENT_WINDOW_MINUTES (15 phút),
+#      server trả `payUrl` dạng /dev/fake-gateway/charges/<mã>. Cùng Idempotency-Key gửi lại thì KHÔNG tạo
+#      giao dịch mới: 200 + Idempotency-Replayed: true, đúng payment cũ (đổi key = một lần thử mới).
+#   2. Đóng vai cổng: request 4 ("khách đã trả") → đơn CONFIRMED; hoặc request 5 ("trả lỗi") → payment FAILED,
+#      đơn về PENDING để thử lại (tối đa 3 lần thử mỗi đơn, mỗi lần dùng một Idempotency-Key mới).
+#      Request 6: cổng báo SAI SỐ TIỀN → không xác nhận đơn, tiền được hoàn lại đúng số đã thu, đơn về PENDING.
+#      (Hai endpoint này chạy đúng đường của webhook thật, kể cả chữ ký. Chỉ có khi PAYMENT_GATEWAY=fake
+#      và không phải production; còn lại trả 404.)
+#   3. Hủy đơn đã trả (http/orders.http): tiền được hoàn tự động, trong vài giây (qua sự kiện) hoặc tối đa
+#      ~1 phút (vòng quét).
+#   4. Không trả trong 15 phút: vòng quét (mỗi 60 giây) cho payment và đơn cùng hết hạn, hàng được trả lại kho.
+#
+# Webhook thật (POST /payments/webhook/:provider) do cổng gọi, không phải bạn: nó công khai nhưng chỉ tin
+# chữ ký `X-Fake-Signature: t=<giây>,v1=<HMAC-SHA256 của "t.nộiDungThô">` với khóa PAYMENT_FAKE_WEBHOOK_SECRET.
+# Muốn thử nó thì dùng test e2e (test/payments.e2e-spec.ts), vì REST Client không tự ký được.
+#
+# Lỗi hay gặp: PAY-001 thiếu/sai Idempotency-Key, PAY-002 đơn COD không trả online được, PAY-003 đơn không
+# trả được lúc này (không còn PENDING), PAY-004 quá 3 lần thử, PAY-005 hết thời hạn hoặc hàng giữ đã mất,
+# PAY-006 cổng không dùng được (503, thử lại được), ORD-002 không thấy đơn (đơn người khác cũng trả y vậy).
+# Giới hạn: bắt đầu trả 10 lần/phút/user; xem 60 lần/phút/user; webhook 300 lần/phút/IP.
+# Phản hồi không bao giờ có mã giao dịch của cổng (providerRef) hay Idempotency-Key; `payUrl` chỉ có khi
+# payment còn INITIATED.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl = http://localhost:3000/api/v1
+@email = thuyphuocthinhtpt+1@gmail.com
+@password = 123456Aa
+
+# Đổi key này cho mỗi LẦN THỬ trả tiền mới (8 đến 100 ký tự: A-Z a-z 0-9 _ -)
+@payKey = pay-attempt-0001
+
+# Điền tay sau khi đặt đơn ONLINE ở http/orders.http (hoặc lấy id từ GET /orders)
+@orderId = PASTE-ORDER-ID-HERE
+
+# Lấy tự động từ các response (không cần sửa)
+@accessToken = {{login.response.body.$.data.accessToken}}
+@payUrl = {{startPayment.response.body.$.data.payUrl}}
+
+
+### 1. Đăng nhập để lấy token (5 lần/15 phút/IP)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+
+### 2. Bắt đầu trả tiền cho đơn ONLINE → 201, payment INITIATED, có payUrl; đơn PAYMENT_PROCESSING
+# @name startPayment
+POST {{baseUrl}}/orders/{{orderId}}/payments
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: {{payKey}}
+
+
+### 3. Xem các lần trả tiền của đơn (mới nhất trước)
+GET {{baseUrl}}/orders/{{orderId}}/payments
+Authorization: Bearer {{accessToken}}
+
+
+### 4. Đóng vai cổng: khách ĐÃ TRẢ → webhook có chữ ký → đơn CONFIRMED (đổi {{payUrl}} nếu bạn muốn dán tay)
+POST {{baseUrl}}{{payUrl}}/pay
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{}
+
+
+### 5. Đóng vai cổng: giao dịch THẤT BẠI → payment FAILED, đơn về PENDING (thử lại bằng key mới)
+POST {{baseUrl}}{{payUrl}}/fail
+Authorization: Bearer {{accessToken}}
+
+
+### 6. Đóng vai cổng: báo thu SAI SỐ TIỀN (ví dụ 1000 đồng) → không xác nhận, hoàn tiền đúng 1000, đơn về PENDING
+POST {{baseUrl}}{{payUrl}}/pay
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "amount": 1000
+}
+
+
+### 7. Thiếu Idempotency-Key → 400 PAY-001
+POST {{baseUrl}}/orders/{{orderId}}/payments
+Authorization: Bearer {{accessToken}}

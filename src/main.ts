@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 import { ValidationPipe } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
@@ -8,12 +9,12 @@ import { LoggingInterceptor } from './core/http/interceptors/logging.interceptor
 import { AppLogger } from './core/http/logging/app.logger.js';
 
 import helmet from 'helmet';
-import { json } from 'express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true, // Buffer logs until custom logger is attached
+    rawBody: true, // A webhook signature is checked against the exact bytes that arrived
   });
   app.useLogger(new AppLogger());
 
@@ -41,7 +42,8 @@ async function bootstrap() {
 
   // Body size limit — reject oversized payloads before they hit any handler
   // Prevents naive DoS via huge JSON body. 1 MB is generous for an API.
-  app.use(json({ limit: '1mb' }));
+  // (useBodyParser, not app.use(json()): it keeps the raw body the webhook signature needs)
+  app.useBodyParser('json', { limit: '1mb' });
 
   app.useGlobalPipes(
     new ValidationPipe({
