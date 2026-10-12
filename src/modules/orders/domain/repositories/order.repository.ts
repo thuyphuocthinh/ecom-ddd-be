@@ -14,6 +14,8 @@ export class OrderAlreadyExistsError extends Error {
 export interface TransitionOptions {
   /** Also set the "stock still to put back" flag in the same step (cancelling a paid order). */
   stockReturnPending?: boolean;
+  /** Also set the new time to pay, in the same step (an order that starts being paid). */
+  expiresAt?: Date;
 }
 
 /**
@@ -59,6 +61,16 @@ export interface IOrderRepository {
 
   /** Online orders still PENDING and past their expiry (database clock), oldest first. */
   findDueOnlineIds(limit: number): Promise<string[]>;
+
+  /**
+   * Online orders in PAYMENT_PROCESSING that were last changed more than this many seconds ago
+   * (database clock), oldest first. The payment module looks at them to find the ones whose
+   * payment never got written.
+   */
+  findStuckPaymentOrderIds(
+    olderThanSeconds: number,
+    limit: number,
+  ): Promise<string[]>;
 
   /** Cash on delivery orders still PENDING that were created more than this many seconds ago. */
   findPendingCodIds(olderThanSeconds: number, limit: number): Promise<string[]>;

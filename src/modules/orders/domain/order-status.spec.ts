@@ -24,6 +24,7 @@ const ALLOWED: Record<PaymentMethod, Array<[OrderStatus, OrderStatus]>> = {
     [PENDING, PAYMENT_PROCESSING],
     [PAYMENT_PROCESSING, CONFIRMED],
     [PAYMENT_PROCESSING, PENDING],
+    [PAYMENT_PROCESSING, EXPIRED],
     [PENDING, CANCELLED],
     [PENDING, EXPIRED],
     [CONFIRMED, CANCELLED],
@@ -120,10 +121,10 @@ describe('canTransition (AC-9)', () => {
       ONLINE,
     ],
     [
-      'an order that is being paid does not expire by itself',
+      'a cash on delivery order is never being paid, so it cannot expire from there',
       PAYMENT_PROCESSING,
       EXPIRED,
-      ONLINE,
+      COD,
     ],
     ['a confirmed order does not expire', CONFIRMED, EXPIRED, COD],
   ])('refuses: %s', (_, from, to, method) => {

@@ -31,12 +31,13 @@ interface Transition {
  *   PENDING ──(COD)──────────────▶ CONFIRMED ──▶ SHIPPING ──▶ DELIVERED
  *      │                               │
  *      ├─(ONLINE)─▶ PAYMENT_PROCESSING ─(ONLINE)─▶ CONFIRMED
- *      │                  └─(ONLINE)─▶ PENDING     (the payment failed, try again)
+ *      │                  ├─(ONLINE)─▶ PENDING     (the payment failed, try again)
+ *      │                  └─(ONLINE)─▶ EXPIRED     (the time to pay ran out, or the held stock was lost)
  *      ├──▶ CANCELLED ◀────────────────┘            (the customer cancels before delivery)
  *      └──▶ EXPIRED                                 (not paid in time, or the held stock was lost)
  *
- * DELIVERED, CANCELLED and EXPIRED are final. Nothing in this module moves an order to or from
- * PAYMENT_PROCESSING yet: the payment module will use these steps.
+ * DELIVERED, CANCELLED and EXPIRED are final. Only the payment module moves an order to or from
+ * PAYMENT_PROCESSING (through StartOrderPayment, ReopenOrder, ExpireOrder and ConfirmOrder).
  */
 export const TRANSITIONS: readonly Transition[] = [
   {
@@ -57,6 +58,11 @@ export const TRANSITIONS: readonly Transition[] = [
   {
     from: OrderStatus.PAYMENT_PROCESSING,
     to: OrderStatus.PENDING,
+    only: PaymentMethod.ONLINE,
+  },
+  {
+    from: OrderStatus.PAYMENT_PROCESSING,
+    to: OrderStatus.EXPIRED,
     only: PaymentMethod.ONLINE,
   },
   { from: OrderStatus.PENDING, to: OrderStatus.CANCELLED },

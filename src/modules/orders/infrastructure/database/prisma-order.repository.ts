@@ -133,11 +133,16 @@ export class PrismaOrderRepository implements IOrderRepository {
   ): Promise<Order | null> {
     return this.prisma.$transaction(async (tx) => {
       const flag = options.stockReturnPending === true;
+      // The time as text with its zone, turned into the UTC wall time the column holds
+      const setExpiry = options.expiresAt
+        ? Prisma.sql`"expiresAt" = (${options.expiresAt.toISOString()}::timestamptz AT TIME ZONE 'UTC'),`
+        : Prisma.empty;
       const changed = await tx.$queryRaw<{ id: string }[]>`
         UPDATE "Order"
         SET "status" = ${to}::"OrderStatus",
             "version" = "version" + 1,
             "stockReturnPending" = ("stockReturnPending" OR ${flag}::boolean),
+            ${setExpiry}
             "updatedAt" = ${DATABASE_NOW}
         WHERE "id" = ${orderId} AND "status" = ${from}::"OrderStatus"
         RETURNING "id"`;
@@ -158,6 +163,19 @@ export class PrismaOrderRepository implements IOrderRepository {
       WHERE "status" = 'PENDING' AND "paymentMethod" = 'ONLINE'
         AND "expiresAt" <= ${DATABASE_NOW}
       ORDER BY "expiresAt"
+      LIMIT ${limit}`;
+    return rows.map((row) => row.id);
+  }
+
+  async findStuckPaymentOrderIds(
+    olderThanSeconds: number,
+    limit: number,
+  ): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Order"
+      WHERE "status" = 'PAYMENT_PROCESSING' AND "paymentMethod" = 'ONLINE'
+        AND "updatedAt" <= ${DATABASE_NOW} - make_interval(secs => ${olderThanSeconds})
+      ORDER BY "updatedAt"
       LIMIT ${limit}`;
     return rows.map((row) => row.id);
   }

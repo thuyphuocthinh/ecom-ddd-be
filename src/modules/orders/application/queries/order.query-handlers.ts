@@ -6,7 +6,12 @@ import {
   type IOrderRepository,
   type Order,
 } from '../../domain/index.js';
-import { GetOrderQuery, ListOrdersQuery } from './order.queries.js';
+import {
+  FindStuckPaymentOrdersQuery,
+  GetOrderByIdQuery,
+  GetOrderQuery,
+  ListOrdersQuery,
+} from './order.queries.js';
 
 export const MIN_PAGE_SIZE = 1;
 export const MAX_PAGE_SIZE = 50;
@@ -56,5 +61,50 @@ export class ListOrdersHandler implements IQueryHandler<
       });
     }
     return page;
+  }
+}
+
+@QueryHandler(FindStuckPaymentOrdersQuery)
+export class FindStuckPaymentOrdersHandler implements IQueryHandler<
+  FindStuckPaymentOrdersQuery,
+  string[]
+> {
+  constructor(
+    @Inject('IOrderRepository') private readonly orders: IOrderRepository,
+  ) {}
+
+  execute({
+    olderThanSeconds,
+    limit,
+  }: FindStuckPaymentOrdersQuery): Promise<string[]> {
+    if (
+      !Number.isInteger(olderThanSeconds) ||
+      olderThanSeconds < 0 ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 1000
+    ) {
+      throw new OrderDomainException(OrderErrorCodes.DOMAIN_EXCEPTION, {
+        reason:
+          'A whole number of seconds and a limit from 1 to 1000 are needed',
+      });
+    }
+    return this.orders.findStuckPaymentOrderIds(olderThanSeconds, limit);
+  }
+}
+
+@QueryHandler(GetOrderByIdQuery)
+export class GetOrderByIdHandler implements IQueryHandler<
+  GetOrderByIdQuery,
+  Order
+> {
+  constructor(
+    @Inject('IOrderRepository') private readonly orders: IOrderRepository,
+  ) {}
+
+  async execute({ orderId }: GetOrderByIdQuery): Promise<Order> {
+    const order = await this.orders.findById(orderId);
+    if (!order) throw new OrderDomainException(OrderErrorCodes.NOT_FOUND);
+    return order;
   }
 }

@@ -22,7 +22,7 @@ const DATABASE_NOW = Prisma.sql`(now() AT TIME ZONE 'UTC')`;
 const BATCH_TRANSACTION_TIMEOUT_MS = 60_000;
 
 /**
- * The events not sent yet. `FOR UPDATE SKIP LOCKED` is what lets two relays run at the same time:
+ * The events not sent yet. `FOR UPDATE SKIP LOCKED` is what lets two publishers run at the same time:
  * each takes the rows nobody else holds, so they never work on the same event together. The rows
  * stay locked until the transaction ends. The sent events are marked inside that transaction; if
  * the process dies after sending but before the commit, the event is simply sent again (at least

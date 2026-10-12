@@ -6,7 +6,7 @@ import { registerAs, type ConfigType } from '@nestjs/config';
  * this object with small values.
  */
 export const ordersConfig = registerAs('orders', () => ({
-  // How often the outbox is read and its events sent to RabbitMQ. 0 switches the relay off.
+  // How often the outbox is read and its events sent to RabbitMQ. 0 switches the publisher off.
   outboxIntervalMs: Number(process.env.ORDER_OUTBOX_INTERVAL_MS ?? 1000),
   // How many events one round sends at most.
   outboxBatchSize: Number(process.env.ORDER_OUTBOX_BATCH_SIZE ?? 50),

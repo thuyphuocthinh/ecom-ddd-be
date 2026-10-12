@@ -18,9 +18,14 @@ import {
   PlaceOrderHandler,
   ReturnStockForCancelledOrdersHandler,
   ShipOrderHandler,
+  StartOrderPaymentHandler,
+  ReopenOrderHandler,
+  ExpireOrderHandler,
+  FindStuckPaymentOrdersHandler,
+  GetOrderByIdHandler,
 } from './application/index.js';
 import {
-  OutboxRelay,
+  OutboxPublisher,
   PrismaOrderRepository,
   PrismaOutboxStore,
 } from './infrastructure/index.js';
@@ -36,8 +41,16 @@ const CommandHandlers = [
   ExpireDueOrdersHandler,
   FinishPendingCodOrdersHandler,
   ReturnStockForCancelledOrdersHandler,
+  StartOrderPaymentHandler,
+  ReopenOrderHandler,
+  ExpireOrderHandler,
 ];
-const QueryHandlers = [GetOrderHandler, ListOrdersHandler];
+const QueryHandlers = [
+  GetOrderHandler,
+  ListOrdersHandler,
+  FindStuckPaymentOrdersHandler,
+  GetOrderByIdHandler,
+];
 
 /**
  * Orders: placing them from the cart, their life (cancel, expiry, simulated delivery) and the
@@ -59,7 +72,7 @@ const QueryHandlers = [GetOrderHandler, ListOrdersHandler];
   providers: [
     { provide: 'IOrderRepository', useClass: PrismaOrderRepository },
     { provide: 'IOutboxStore', useClass: PrismaOutboxStore },
-    OutboxRelay,
+    OutboxPublisher,
     OrderStockReturner,
     OrderMaintenance,
     ...CommandHandlers,

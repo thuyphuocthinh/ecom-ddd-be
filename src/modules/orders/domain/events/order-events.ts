@@ -3,7 +3,7 @@ import type { Order } from '../entities/order.entity.js';
 import type { OrderStatus } from '../order-status.js';
 
 /**
- * An event written to the outbox in the same transaction as the change it reports. The relay sends
+ * An event written to the outbox in the same transaction as the change it reports. The publisher sends
  * it later; `type` becomes the event name (`order.created`) and `payload` its data.
  *
  * Neither event carries the delivery address or the phone number: whoever listens does not need

@@ -13,3 +13,6 @@ export * from './commands/shipping-commands.js';
 export * from './commands/shipping.handlers.js';
 export * from './queries/order.queries.js';
 export * from './queries/order.query-handlers.js';
+export * from './order-move.js';
+export * from './commands/payment-steps.commands.js';
+export * from './commands/payment-steps.handlers.js';

@@ -23,7 +23,7 @@ import { CartOrderingService } from '../cart/application/index.js';
 import { PrismaAddressRepository } from '../users/infrastructure/database/prisma-address.repository.js';
 import { GetAddressHandler } from '../users/application/index.js';
 import {
-  OutboxRelay,
+  OutboxPublisher,
   PrismaOrderRepository,
   PrismaOutboxStore,
 } from './infrastructure/index.js';
@@ -48,7 +48,7 @@ const addressId = (i: number) => `burst_address_${i}`;
 
 /**
  * Many orders at once, and many waves of them, against the real Postgres and Redis, with the
- * outbox relay and the maintenance sweep running for real while the orders come in. What must
+ * outbox publisher and the maintenance sweep running for real while the orders come in. What must
  * hold: nothing is sold twice, no request fails in a way the customer cannot understand (only
  * "not enough stock" is allowed to refuse), the connection pool of the database does not run dry,
  * and every event reaches the bus.
@@ -60,7 +60,7 @@ describe('Orders arriving in bursts (Integration)', () => {
   let commands: CommandBus;
   let cartStore: RedisCartStore;
   let bus: InMemoryEventBus;
-  let relay: OutboxRelay;
+  let publisher: OutboxPublisher;
 
   const originalPoolMax = process.env.DATABASE_POOL_MAX;
 
@@ -92,7 +92,7 @@ describe('Orders arriving in bursts (Integration)', () => {
         { provide: 'IOrderRepository', useExisting: PrismaOrderRepository },
         PrismaOutboxStore,
         { provide: 'IOutboxStore', useExisting: PrismaOutboxStore },
-        // The relay and the sweep run on their own timers, as they do in the real application
+        // The publisher and the sweep run on their own timers, as they do in the real application
         {
           provide: ordersConfig.KEY,
           useValue: {
@@ -101,7 +101,7 @@ describe('Orders arriving in bursts (Integration)', () => {
             maintenanceIntervalSeconds: 1,
           },
         },
-        OutboxRelay,
+        OutboxPublisher,
         OrderStockReturner,
         OrderMaintenance,
         PlaceOrderHandler,
@@ -118,7 +118,7 @@ describe('Orders arriving in bursts (Integration)', () => {
     commands = module.get(CommandBus);
     cartStore = module.get(RedisCartStore);
     bus = module.get<InMemoryEventBus>(EVENT_BUS);
-    relay = module.get(OutboxRelay);
+    publisher = module.get(OutboxPublisher);
 
     await prisma.province.upsert({
       where: { code: '97' },
@@ -378,7 +378,7 @@ describe('Orders arriving in bursts (Integration)', () => {
       await stockAgrees(id);
   }, 120_000);
 
-  it('10 waves of 100 users after 500 units, while the relay and the sweep run: nothing oversold, nothing lost, every event sent', async () => {
+  it('10 waves of 100 users after 500 units, while the publisher and the sweep run: nothing oversold, nothing lost, every event sent', async () => {
     await sku('BURST_C', 500);
     await fillCarts(0, USER_COUNT, [['BURST_C', 1]]);
 
@@ -414,9 +414,9 @@ describe('Orders arriving in bursts (Integration)', () => {
     ).toBe(0);
     await stockAgrees('BURST_C');
 
-    // The relay (running by itself) sends everything; nothing is missing at the bus
+    // The publisher (running by itself) sends everything; nothing is missing at the bus
     await untilAllSent();
-    await relay.runOnce();
+    await publisher.runOnce();
     const written = await prisma.outboxEvent.findMany({
       select: { id: true, type: true, aggregateId: true },
     });
@@ -451,7 +451,7 @@ describe('Orders arriving in bursts (Integration)', () => {
     const started = Date.now();
     await prisma.order.count();
     expect(Date.now() - started).toBeLessThan(1000);
-    // (the relay's own batch transaction is meant to stay open while it sends, so it is left out)
+    // (the publisher's own batch transaction is meant to stay open while it sends, so it is left out)
     const stuck = await prisma.$queryRaw<{ count: bigint }[]>`
       SELECT count(*) FROM pg_stat_activity
       WHERE datname = current_database() AND state = 'idle in transaction'

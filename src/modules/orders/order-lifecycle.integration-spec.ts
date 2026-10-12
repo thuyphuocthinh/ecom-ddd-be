@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
-import { CommandBus, CqrsModule } from '@nestjs/cqrs';
+import { CommandBus, CqrsModule, QueryBus } from '@nestjs/cqrs';
 import {
   CACHE,
   DatabaseModule,
@@ -17,6 +17,7 @@ import { SkuLookupService } from '../catalog/application/index.js';
 import { InventoryModule } from '../inventory/inventory.module.js';
 import {
   ConfirmReservationCommand,
+  ExtendReservationCommand,
   ReleaseExpiredReservationsCommand,
   ReleaseReservationCommand,
 } from '../inventory/application/index.js';
@@ -30,6 +31,14 @@ import {
   CancelOrderHandler,
   ConfirmOrderCommand,
   ConfirmOrderHandler,
+  ExpireOrderCommand,
+  ExpireOrderHandler,
+  FindStuckPaymentOrdersHandler,
+  FindStuckPaymentOrdersQuery,
+  ReopenOrderCommand,
+  ReopenOrderHandler,
+  StartOrderPaymentCommand,
+  StartOrderPaymentHandler,
   ExpireDueOrdersCommand,
   ExpireDueOrdersHandler,
   FinishPendingCodOrdersCommand,
@@ -67,6 +76,7 @@ describe('The life of an order (Integration)', () => {
   let prisma: PrismaService;
   let redis: ReturnType<RedisService['getClient']>;
   let commands: CommandBus;
+  let queries: QueryBus;
   let cartStore: RedisCartStore;
   let orderRepo: PrismaOrderRepository;
   let maintenance: OrderMaintenance;
@@ -109,6 +119,10 @@ describe('The life of an order (Integration)', () => {
         ExpireDueOrdersHandler,
         FinishPendingCodOrdersHandler,
         ReturnStockForCancelledOrdersHandler,
+        StartOrderPaymentHandler,
+        ReopenOrderHandler,
+        ExpireOrderHandler,
+        FindStuckPaymentOrdersHandler,
         OrderMaintenance,
       ],
     }).compile();
@@ -116,6 +130,7 @@ describe('The life of an order (Integration)', () => {
     prisma = module.get(PrismaService);
     redis = module.get(RedisService).getClient();
     commands = module.get(CommandBus);
+    queries = module.get(QueryBus);
     cartStore = module.get(RedisCartStore);
     orderRepo = module.get(PrismaOrderRepository);
     maintenance = module.get(OrderMaintenance);
@@ -795,6 +810,384 @@ describe('The life of an order (Integration)', () => {
 
       expect(await statusChanges(due.order.id)).toEqual(['PENDING>EXPIRED']);
       expect(await available(due.skuId)).toBe(10);
+    });
+  });
+  // ── AC-20: the steps of an online payment ─────────────────────────────────
+
+  describe('the order steps of an online payment (AC-20)', () => {
+    const startPayment = (orderId: string, minutes = 15) =>
+      commands.execute<StartOrderPaymentCommand, Order>(
+        new StartOrderPaymentCommand(
+          orderId,
+          new Date(Date.now() + minutes * 60_000),
+        ),
+      );
+    const reopen = (orderId: string) =>
+      commands.execute<ReopenOrderCommand, Order>(
+        new ReopenOrderCommand(orderId),
+      );
+    const expireOrder = (orderId: string) =>
+      commands.execute<ExpireOrderCommand, Order>(
+        new ExpireOrderCommand(orderId),
+      );
+    const confirmOrder = (orderId: string) =>
+      commands.execute(new ConfirmOrderCommand(orderId));
+    const expiryOfOrder = async (orderId: string) =>
+      (await reload(orderId)).expiresAt.getTime();
+
+    it('moves a PENDING online order to PAYMENT_PROCESSING with the new time to pay, and writes the event', async () => {
+      const { order } = await placed(PaymentMethod.ONLINE);
+      const until = new Date(Date.now() + 30 * 60_000);
+
+      const started = await commands.execute<StartOrderPaymentCommand, Order>(
+        new StartOrderPaymentCommand(order.id, until),
+      );
+
+      expect(started).toMatchObject({
+        status: 'PAYMENT_PROCESSING',
+        version: 2,
+      });
+      expect(started.expiresAt.getTime()).toBe(until.getTime());
+      expect((await reload(order.id)).expiresAt.getTime()).toBe(
+        until.getTime(),
+      );
+      expect(await statusChanges(order.id)).toEqual([
+        'PENDING>PAYMENT_PROCESSING',
+      ]);
+    });
+
+    it('keeps the held stock where it is: still held, Redis unchanged', async () => {
+      const { order, skuId } = await placed(PaymentMethod.ONLINE);
+
+      await startPayment(order.id);
+
+      expect(await reservationStatus(order.id)).toEqual(['RESERVED']);
+      expect(await available(skuId)).toBe(7);
+    });
+
+    it('goes together with extending the hold: the order and the hold end up with the same time to pay', async () => {
+      const { order } = await placed(PaymentMethod.ONLINE);
+      const extended = await commands.execute<
+        ExtendReservationCommand,
+        { expiresAt: Date }
+      >(new ExtendReservationCommand(order.id, 1800));
+
+      await commands.execute(
+        new StartOrderPaymentCommand(order.id, extended.expiresAt),
+      );
+
+      const hold = await prisma.reservation.findFirstOrThrow({
+        where: { orderId: order.id },
+      });
+      expect(hold.expiresAt.getTime()).toBe(extended.expiresAt.getTime());
+      expect(await expiryOfOrder(order.id)).toBe(extended.expiresAt.getTime());
+    });
+
+    it('refuses a cash on delivery order, an order already being paid, a closed order, and an unknown order', async () => {
+      const cod = (await placed(PaymentMethod.COD)).order; // CONFIRMED right away
+      const cash = (await placed(PaymentMethod.COD, { confirmFailure: true }))
+        .order; // still PENDING
+      const paying = (await placed(PaymentMethod.ONLINE)).order;
+      await startPayment(paying.id);
+      const cancelled = (await placed(PaymentMethod.ONLINE)).order;
+      await cancel(cancelled.id);
+
+      for (const id of [cod.id, cash.id, paying.id, cancelled.id]) {
+        expect(await failureOf(startPayment(id))).toBe('ORD-006');
+      }
+      expect(
+        await failureOf(startPayment(deriveOrderId(U1, 'nothing-here-0000'))),
+      ).toBe('ORD-002');
+      expect((await reload(cash.id)).status).toBe('PENDING');
+    });
+
+    it('five starts at the same moment: one wins, four get ORD-006, one event', async () => {
+      const { order } = await placed(PaymentMethod.ONLINE);
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 5 }, () => startPayment(order.id)),
+      );
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      for (const r of results.filter((r) => r.status === 'rejected')) {
+        expect((r as PromiseRejectedResult).reason.code).toBe('ORD-006');
+      }
+      expect((await reload(order.id)).version).toBe(2);
+      expect(await statusChanges(order.id)).toEqual([
+        'PENDING>PAYMENT_PROCESSING',
+      ]);
+    });
+
+    it('a customer cannot cancel an order that is being paid', async () => {
+      const { order } = await placed(PaymentMethod.ONLINE);
+      await startPayment(order.id);
+
+      expect(await failureOf(cancel(order.id))).toBe('ORD-006');
+      expect((await reload(order.id)).status).toBe('PAYMENT_PROCESSING');
+    });
+
+    it('a start and a cancel at the same moment: exactly one wins, and the stock agrees with it', async () => {
+      for (let i = 0; i < 8; i++) {
+        const { order, skuId } = await placed(PaymentMethod.ONLINE);
+
+        const [started, cancelled] = await Promise.allSettled([
+          startPayment(order.id),
+          cancel(order.id),
+        ]);
+
+        const final = await reload(order.id);
+        if (final.status === 'CANCELLED') {
+          expect(cancelled.status).toBe('fulfilled');
+          expect((started as PromiseRejectedResult).reason.code).toBe(
+            'ORD-006',
+          );
+          expect(await reservationStatus(order.id)).toEqual(['RELEASED']);
+          expect(await available(skuId)).toBe(10);
+        } else {
+          expect(final.status).toBe('PAYMENT_PROCESSING');
+          expect((cancelled as PromiseRejectedResult).reason.code).toBe(
+            'ORD-006',
+          );
+          expect(await reservationStatus(order.id)).toEqual(['RESERVED']);
+          expect(await available(skuId)).toBe(7);
+        }
+        expect(final.version).toBe(2);
+        expect(await statusChanges(order.id)).toHaveLength(1);
+      }
+    });
+
+    it('a start and the expiry sweep at the same moment: exactly one wins', async () => {
+      for (let i = 0; i < 6; i++) {
+        const { order } = await placed(PaymentMethod.ONLINE);
+        await setColumn(order.id, 'expiresAt', LONG_AGO);
+
+        await Promise.allSettled([
+          startPayment(order.id),
+          commands.execute(new ExpireDueOrdersCommand()),
+        ]);
+
+        const final = await reload(order.id);
+        expect(['PAYMENT_PROCESSING', 'EXPIRED']).toContain(final.status);
+        expect(final.version).toBe(2);
+        expect(await statusChanges(order.id)).toHaveLength(1);
+      }
+    });
+
+    describe('reopening', () => {
+      it('takes an order that is being paid back to PENDING, keeping its time to pay, and writes the event', async () => {
+        const { order } = await placed(PaymentMethod.ONLINE);
+        const started = await startPayment(order.id, 20);
+
+        const reopened = await reopen(order.id);
+
+        expect(reopened).toMatchObject({ status: 'PENDING', version: 3 });
+        expect(reopened.expiresAt.getTime()).toBe(started.expiresAt.getTime());
+        expect(await statusChanges(order.id)).toEqual([
+          'PENDING>PAYMENT_PROCESSING',
+          'PAYMENT_PROCESSING>PENDING',
+        ]);
+      });
+
+      it('lets the customer start paying again, and can be repeated', async () => {
+        const { order } = await placed(PaymentMethod.ONLINE);
+        await startPayment(order.id);
+        await reopen(order.id);
+
+        const again = await startPayment(order.id);
+
+        expect(again.status).toBe('PAYMENT_PROCESSING');
+        expect(again.version).toBe(4);
+      });
+
+      it('refuses an order that is not being paid', async () => {
+        const pending = (await placed(PaymentMethod.ONLINE)).order;
+        const done = (await placed(PaymentMethod.COD)).order;
+
+        expect(await failureOf(reopen(pending.id))).toBe('ORD-006');
+        expect(await failureOf(reopen(done.id))).toBe('ORD-006');
+      });
+
+      it('two reopens at the same moment: one wins', async () => {
+        const { order } = await placed(PaymentMethod.ONLINE);
+        await startPayment(order.id);
+
+        const results = await Promise.allSettled([
+          reopen(order.id),
+          reopen(order.id),
+          reopen(order.id),
+        ]);
+
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        expect((await reload(order.id)).version).toBe(3);
+      });
+    });
+
+    describe('expiring', () => {
+      it.each(['PENDING', 'PAYMENT_PROCESSING'])(
+        'expires an order in %s and gives the held stock back (hold RELEASED, Redis restored), with the event',
+        async (status) => {
+          const { order, skuId } = await placed(PaymentMethod.ONLINE);
+          if (status === 'PAYMENT_PROCESSING') await startPayment(order.id);
+
+          const expired = await expireOrder(order.id);
+
+          expect(expired.status).toBe('EXPIRED');
+          expect(await reservationStatus(order.id)).toEqual(['RELEASED']);
+          expect(await available(skuId)).toBe(10);
+          expect((await statusChanges(order.id)).pop()).toBe(
+            `${status}>EXPIRED`,
+          );
+        },
+      );
+
+      it('refuses an order that is confirmed, cancelled, or already expired, and leaves the stock alone', async () => {
+        const confirmed = await placed(PaymentMethod.COD);
+        const cancelled = (await placed(PaymentMethod.ONLINE)).order;
+        await cancel(cancelled.id);
+        const expired = (await placed(PaymentMethod.ONLINE)).order;
+        await expireOrder(expired.id);
+
+        for (const id of [confirmed.order.id, cancelled.id, expired.id]) {
+          expect(await failureOf(expireOrder(id))).toBe('ORD-006');
+        }
+        expect(await reservationStatus(confirmed.order.id)).toEqual([
+          'CONFIRMED',
+        ]);
+        expect(await onHand(confirmed.skuId)).toBe(7);
+      });
+
+      it('still expires the order when the held stock cannot be given back; the hold runs out by itself', async () => {
+        const { order, skuId } = await placed(PaymentMethod.ONLINE);
+        const real = commands.execute.bind(commands);
+        vi.spyOn(commands, 'execute').mockImplementation((command: any) =>
+          command instanceof ReleaseReservationCommand
+            ? Promise.reject(new Error('Redis down'))
+            : real(command),
+        );
+
+        const expired = await expireOrder(order.id);
+        vi.restoreAllMocks();
+
+        expect(expired.status).toBe('EXPIRED');
+        expect(await reservationStatus(order.id)).toEqual(['RESERVED']);
+        await prisma.reservation.updateMany({
+          data: { expiresAt: new Date(Date.now() - 60_000) },
+        });
+        await commands.execute(new ReleaseExpiredReservationsCommand());
+        expect(await reservationStatus(order.id)).toEqual(['RELEASED']);
+        expect(await available(skuId)).toBe(10);
+      });
+
+      it('an expiry and a cancel at the same moment: exactly one wins, the stock is given back once', async () => {
+        for (let i = 0; i < 6; i++) {
+          const { order, skuId } = await placed(PaymentMethod.ONLINE);
+
+          await Promise.allSettled([expireOrder(order.id), cancel(order.id)]);
+
+          const final = await reload(order.id);
+          expect(['CANCELLED', 'EXPIRED']).toContain(final.status);
+          expect(final.version).toBe(2);
+          expect(await reservationStatus(order.id)).toEqual(['RELEASED']);
+          expect(await available(skuId)).toBe(10);
+        }
+      });
+    });
+
+    describe('confirming an order that is being paid', () => {
+      it('takes the stock out of the warehouse first and then confirms the order (ONLINE)', async () => {
+        const { order, skuId } = await placed(PaymentMethod.ONLINE);
+        await startPayment(order.id);
+
+        const result = (await confirmOrder(order.id)) as {
+          kind: string;
+          order: Order;
+        };
+
+        expect(result.kind).toBe('CONFIRMED');
+        expect(result.order.status).toBe('CONFIRMED');
+        expect(await reservationStatus(order.id)).toEqual(['CONFIRMED']);
+        expect(await onHand(skuId)).toBe(7);
+        expect(await available(skuId)).toBe(7);
+        expect(await statusChanges(order.id)).toEqual([
+          'PENDING>PAYMENT_PROCESSING',
+          'PAYMENT_PROCESSING>CONFIRMED',
+        ]);
+      });
+
+      it('confirming again changes nothing more', async () => {
+        const { order, skuId } = await placed(PaymentMethod.ONLINE);
+        await startPayment(order.id);
+        await confirmOrder(order.id);
+
+        const again = (await confirmOrder(order.id)) as { kind: string };
+
+        expect(again.kind).toBe('CONFIRMED');
+        expect(await onHand(skuId)).toBe(7);
+        expect(await statusChanges(order.id)).toHaveLength(2);
+      });
+
+      it('reports that the hold was lost when the stock was given back first, and the order can then be expired', async () => {
+        const { order, skuId } = await placed(PaymentMethod.ONLINE);
+        await startPayment(order.id);
+        await commands.execute(new ReleaseReservationCommand(order.id));
+
+        const result = await confirmOrder(order.id);
+
+        expect(result).toEqual({ kind: 'HOLD_LOST' });
+        expect((await reload(order.id)).status).toBe('PAYMENT_PROCESSING');
+        expect(await onHand(skuId)).toBe(10);
+        expect((await expireOrder(order.id)).status).toBe('EXPIRED');
+      });
+
+      it('an online order that is only PENDING cannot be confirmed (it has not been paid)', async () => {
+        const { order, skuId } = await placed(PaymentMethod.ONLINE);
+
+        expect(await failureOf(confirmOrder(order.id))).toBe('ORD-006');
+        expect(await onHand(skuId)).toBe(10);
+      });
+    });
+
+    describe('finding the orders whose payment never got written', () => {
+      const stuck = (olderThanSeconds: number, limit = 100) =>
+        queries.execute<FindStuckPaymentOrdersQuery, string[]>(
+          new FindStuckPaymentOrdersQuery(olderThanSeconds, limit),
+        );
+
+      it('lists online orders that have been PAYMENT_PROCESSING for longer than the given time (database clock), oldest first', async () => {
+        const old = (await placed(PaymentMethod.ONLINE)).order;
+        const older = (await placed(PaymentMethod.ONLINE)).order;
+        const fresh = (await placed(PaymentMethod.ONLINE)).order;
+        for (const o of [old, older, fresh]) await startPayment(o.id);
+        await setColumn(old.id, 'updatedAt', LONG_AGO);
+        await setColumn(older.id, 'updatedAt', 2 * LONG_AGO);
+
+        expect(await stuck(60)).toEqual([older.id, old.id]);
+        expect(await stuck(60, 1)).toEqual([older.id]);
+      });
+
+      it('does not list orders in any other state, whatever their age', async () => {
+        const pending = (await placed(PaymentMethod.ONLINE)).order;
+        const confirmed = (await placed(PaymentMethod.COD)).order;
+        const reopened = (await placed(PaymentMethod.ONLINE)).order;
+        await startPayment(reopened.id);
+        await reopen(reopened.id);
+        const expired = (await placed(PaymentMethod.ONLINE)).order;
+        await expireOrder(expired.id);
+        for (const o of [pending, confirmed, reopened, expired]) {
+          await setColumn(o.id, 'updatedAt', LONG_AGO);
+        }
+
+        expect(await stuck(60)).toEqual([]);
+      });
+
+      it('refuses a nonsense age or limit', async () => {
+        expect(await failureOf(Promise.resolve().then(() => stuck(-1)))).toBe(
+          'ORD-000',
+        );
+        expect(
+          await failureOf(Promise.resolve().then(() => stuck(60, 0))),
+        ).toBe('ORD-000');
+      });
     });
   });
 });

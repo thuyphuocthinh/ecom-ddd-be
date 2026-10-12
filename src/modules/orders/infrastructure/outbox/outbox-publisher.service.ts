@@ -19,8 +19,8 @@ import { ordersConfig, type OrdersConfig } from '../../orders.config.js';
  * the event, not to the log.
  */
 @Injectable()
-export class OutboxRelay implements OnModuleInit, OnApplicationShutdown {
-  private readonly logger = new Logger(OutboxRelay.name);
+export class OutboxPublisher implements OnModuleInit, OnApplicationShutdown {
+  private readonly logger = new Logger(OutboxPublisher.name);
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<unknown> | null = null;
 
