@@ -16,6 +16,12 @@ const CLOUDINARY_CLOUD_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const CLOUDINARY_FOLDER_PATTERN = /^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/;
 // Where background jobs (sending email) run: on RabbitMQ, or right inside the request (dev, tests)
 const JOB_QUEUES = ['rabbitmq', 'inline'];
+// Which payment gateway is used. `fake` is a stand-in that runs inside the application; it never
+// moves real money, so it is for development and tests only. A real gateway is added here when
+// its adapter exists.
+const PAYMENT_GATEWAYS = ['fake'];
+const DEV_ONLY_PAYMENT_GATEWAYS = ['fake'];
+const PAYMENT_SECRET_MIN_LENGTH = 16;
 // Where the built-in local RabbitMQ address may be used
 const LOCAL_ENVIRONMENTS = [undefined, 'development', 'test'];
 const OPTIONAL_POSITIVE_INT_VARS = [
@@ -23,10 +29,28 @@ const OPTIONAL_POSITIVE_INT_VARS = [
   'REFRESH_TOKEN_TTL_SECONDS',
   'SESSION_ABSOLUTE_TTL_SECONDS',
 ];
-// Database pool, inventory and order settings are whole numbers too. A sweep or relay interval may be 0: that
+// Payment, database pool, inventory and order settings are whole numbers too. A sweep or publisher interval may be 0: that
 // switches it off (tests run it by hand). The hold time is at most 7 days because the "give the
 // stock back" timer is a delayed job, and a job may be delayed by 7 days at most.
 const INT_SETTING_VARS = [
+  {
+    name: 'PAYMENT_WINDOW_MINUTES',
+    unit: 'minutes',
+    min: 1,
+    max: 24 * 60,
+  },
+  {
+    name: 'PAYMENT_MAINTENANCE_INTERVAL_SECONDS',
+    unit: 'seconds',
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+  },
+  {
+    name: 'PAYMENT_WEBHOOK_TOLERANCE_SECONDS',
+    unit: 'seconds',
+    min: 1,
+    max: 3600,
+  },
   {
     name: 'DATABASE_POOL_MAX',
     unit: 'connections',
@@ -169,6 +193,7 @@ export function validateEnv(
   }
 
   validateCloudinary(config, errors);
+  validatePayment(config, errors);
 
   for (const name of OPTIONAL_POSITIVE_INT_VARS) {
     if (config[name] === undefined) continue;
@@ -232,6 +257,39 @@ function validateSmtp(config: Record<string, unknown>, errors: string[]): void {
     errors.push(
       'EMAIL_FROM must be set to a sender address when EMAIL_PROVIDER=smtp, e.g. "Ecom <no-reply@example.com>"',
     );
+  }
+}
+
+/** The payment gateway must be one that exists, not a stand-in in production, and have its key. */
+function validatePayment(
+  config: Record<string, unknown>,
+  errors: string[],
+): void {
+  const gateway = (config.PAYMENT_GATEWAY ?? 'fake') as string;
+  if (!PAYMENT_GATEWAYS.includes(gateway)) {
+    errors.push(
+      `PAYMENT_GATEWAY must be one of: ${PAYMENT_GATEWAYS.join(', ')} (got "${gateway}")`,
+    );
+    return;
+  }
+  if (
+    DEV_ONLY_PAYMENT_GATEWAYS.includes(gateway) &&
+    config.NODE_ENV === 'production'
+  ) {
+    errors.push(
+      `PAYMENT_GATEWAY=${gateway} is a stand-in that never moves real money and is not allowed in production`,
+    );
+  }
+  if (gateway === 'fake') {
+    const secret = config.PAYMENT_FAKE_WEBHOOK_SECRET;
+    if (
+      typeof secret !== 'string' ||
+      secret.length < PAYMENT_SECRET_MIN_LENGTH
+    ) {
+      errors.push(
+        `PAYMENT_FAKE_WEBHOOK_SECRET must be set to a string of at least ${PAYMENT_SECRET_MIN_LENGTH} characters when PAYMENT_GATEWAY=fake`,
+      );
+    }
   }
 }
 

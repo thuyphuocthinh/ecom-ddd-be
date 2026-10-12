@@ -14,7 +14,7 @@ import {
 } from './../src/core/index.js';
 import { InMemoryEventBus } from './../src/core/infrastructure/messaging/events/in-memory-event-bus.js';
 import { SessionIssuer } from './../src/modules/auth/application/index.js';
-import { OutboxRelay } from './../src/modules/orders/infrastructure/index.js';
+import { OutboxPublisher } from './../src/modules/orders/infrastructure/index.js';
 import { ordersConfig } from './../src/modules/orders/orders.config.js';
 
 const API = '/api/v1';
@@ -27,7 +27,7 @@ describe('Orders (e2e)', () => {
   let prisma: PrismaService;
   let redis: RedisService;
   let issuer: SessionIssuer;
-  let relay: OutboxRelay;
+  let publisher: OutboxPublisher;
   let bus: InMemoryEventBus;
 
   const http = () => request(app.getHttpServer());
@@ -112,7 +112,7 @@ describe('Orders (e2e)', () => {
     prisma = app.get(PrismaService);
     redis = app.get(RedisService);
     issuer = app.get(SessionIssuer);
-    relay = app.get(OutboxRelay);
+    publisher = app.get(OutboxPublisher);
     bus = app.get<InMemoryEventBus>(EVENT_BUS);
 
     await prisma.province.upsert({
@@ -135,6 +135,7 @@ describe('Orders (e2e)', () => {
   const clear = async () => {
     await redis.getClient().flushdb();
     await prisma.outboxEvent.deleteMany();
+    await prisma.payment.deleteMany();
     await prisma.order.deleteMany();
     await prisma.reservation.deleteMany();
     await prisma.skuStock.deleteMany();
@@ -299,7 +300,7 @@ describe('Orders (e2e)', () => {
     await inCart(user, 'E_S1', 1);
     const res = await place(user, 'COD').expect(201);
 
-    await relay.runOnce();
+    await publisher.runOnce();
 
     expect(bus.published.map((e) => e.name)).toEqual([
       'order.created',

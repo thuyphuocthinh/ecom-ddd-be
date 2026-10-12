@@ -12,7 +12,7 @@ import { EVENT_BUS_OPTIONS } from '../src/core/infrastructure/messaging/events/e
 import { EventBusModule } from '../src/core/infrastructure/messaging/events/event-bus.module.js';
 import { RabbitMqEventBus } from '../src/core/infrastructure/messaging/events/rabbitmq-event-bus.js';
 import { PrismaOutboxStore } from '../src/modules/orders/infrastructure/database/prisma-outbox.store.js';
-import { OutboxRelay } from '../src/modules/orders/infrastructure/outbox/outbox-relay.service.js';
+import { OutboxPublisher } from '../src/modules/orders/infrastructure/outbox/outbox-publisher.service.js';
 import { ordersConfig } from '../src/modules/orders/orders.config.js';
 
 /**
@@ -46,7 +46,7 @@ describe('Outbox to RabbitMQ (e2e)', () => {
   let admin: amqp.ChannelModel;
   let channel: amqp.Channel;
   let prisma: PrismaService;
-  let relay: OutboxRelay;
+  let publisher: OutboxPublisher;
   const original = { ...process.env };
 
   const depth = async () => (await channel.checkQueue(QUEUE)).messageCount;
@@ -89,7 +89,7 @@ describe('Outbox to RabbitMQ (e2e)', () => {
             maintenanceIntervalSeconds: 0,
           },
         },
-        OutboxRelay,
+        OutboxPublisher,
       ],
     })
       .overrideProvider(EVENT_BUS_OPTIONS)
@@ -102,7 +102,7 @@ describe('Outbox to RabbitMQ (e2e)', () => {
     );
     expect(moduleRef.get(EVENT_BUS)).toBeInstanceOf(RabbitMqEventBus);
     prisma = moduleRef.get(PrismaService);
-    relay = moduleRef.get(OutboxRelay);
+    publisher = moduleRef.get(OutboxPublisher);
 
     await until(async () => {
       try {
@@ -140,7 +140,7 @@ describe('Outbox to RabbitMQ (e2e)', () => {
   it('delivers an event written to the outbox to a listener, with its id and its data, and marks it sent', async () => {
     const id = await addEvent('order.created');
 
-    const result = await relay.runOnce();
+    const result = await publisher.runOnce();
 
     expect(result).toEqual({ sent: 1, failure: null });
     await until(async () => (await depth()) === 1, 'the message on the queue');
@@ -165,7 +165,7 @@ describe('Outbox to RabbitMQ (e2e)', () => {
       await addEvent(),
     ];
 
-    await relay.runOnce();
+    await publisher.runOnce();
 
     await until(async () => (await depth()) === 3, 'three messages');
     const received: string[] = [];
@@ -188,7 +188,7 @@ describe('Outbox to RabbitMQ (e2e)', () => {
     );
     await until(() => !rabbit.isConnected(), 'the connection to drop');
 
-    const down = await relay.runOnce();
+    const down = await publisher.runOnce();
 
     expect(down.sent).toBe(0);
     expect(down.failure).not.toBeNull();
@@ -199,7 +199,7 @@ describe('Outbox to RabbitMQ (e2e)', () => {
     process.env.RABBITMQ_URL = RABBITMQ_URL;
     await until(() => rabbit.isConnected(), 'the reconnection', 15_000);
     await until(
-      async () => (await relay.runOnce()).sent === 1,
+      async () => (await publisher.runOnce()).sent === 1,
       'the event to be sent',
       15_000,
     );

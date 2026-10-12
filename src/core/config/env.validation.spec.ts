@@ -4,6 +4,8 @@ import { validateEnv } from './env.validation.js';
 const VALID = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
   JWT_ACCESS_SECRET: 'x'.repeat(32),
+  // The payment gateway defaults to the fake one, which needs a key to sign its webhooks
+  PAYMENT_FAKE_WEBHOOK_SECRET: 'fake-webhook-secret-0001',
 };
 
 describe('validateEnv', () => {
@@ -83,13 +85,15 @@ describe('validateEnv', () => {
     });
 
     it('is allowed in production, unlike the log adapter', () => {
-      expect(() =>
-        validateEnv({
-          ...SMTP,
-          NODE_ENV: 'production',
-          RABBITMQ_URL: 'amqp://u:p@broker:5672',
-        }),
-      ).not.toThrow();
+      expect(
+        () =>
+          validateEnv({
+            ...SMTP,
+            NODE_ENV: 'production',
+            RABBITMQ_URL: 'amqp://u:p@broker:5672',
+          }),
+        // (the fake payment gateway is refused in production for its own reason, tested below)
+      ).not.toThrow(/EMAIL_PROVIDER|SMTP|EMAIL_FROM/);
     });
 
     it('needs a host', () => {
@@ -170,7 +174,7 @@ describe('validateEnv', () => {
       expect(() => validateEnv(production)).toThrow(/RABBITMQ_URL/);
       expect(() =>
         validateEnv({ ...production, RABBITMQ_URL: 'amqp://u:p@broker:5672' }),
-      ).not.toThrow();
+      ).not.toThrow(/RABBITMQ_URL/);
     });
 
     it.each(['staging', 'prod', 'Production'])(
@@ -399,6 +403,66 @@ describe('validateEnv', () => {
       expect(() => validateEnv({ ...VALID, [name]: value })).toThrow(
         new RegExp(name),
       );
+    });
+  });
+
+  describe('payment settings', () => {
+    it('accepts the defaults, and values in range', () => {
+      expect(() => validateEnv({ ...VALID })).not.toThrow();
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          PAYMENT_GATEWAY: 'fake',
+          PAYMENT_WINDOW_MINUTES: '15',
+          PAYMENT_MAINTENANCE_INTERVAL_SECONDS: '60',
+          PAYMENT_WEBHOOK_TOLERANCE_SECONDS: '300',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        validateEnv({ ...VALID, PAYMENT_MAINTENANCE_INTERVAL_SECONDS: '0' }),
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['PAYMENT_WINDOW_MINUTES', '0'],
+      ['PAYMENT_WINDOW_MINUTES', '1441'],
+      ['PAYMENT_WINDOW_MINUTES', '1.5'],
+      ['PAYMENT_MAINTENANCE_INTERVAL_SECONDS', '-1'],
+      ['PAYMENT_MAINTENANCE_INTERVAL_SECONDS', 'often'],
+      ['PAYMENT_WEBHOOK_TOLERANCE_SECONDS', '0'],
+      ['PAYMENT_WEBHOOK_TOLERANCE_SECONDS', '3601'],
+    ])('rejects %s=%s', (name, value) => {
+      expect(() => validateEnv({ ...VALID, [name]: value })).toThrow(
+        new RegExp(name),
+      );
+    });
+
+    it('refuses a gateway that does not exist', () => {
+      expect(() =>
+        validateEnv({ ...VALID, PAYMENT_GATEWAY: 'stripe' }),
+      ).toThrow(/PAYMENT_GATEWAY/);
+    });
+
+    it('needs a key of at least 16 characters to sign the webhooks of the fake gateway', () => {
+      expect(() =>
+        validateEnv({ ...VALID, PAYMENT_FAKE_WEBHOOK_SECRET: undefined }),
+      ).toThrow(/PAYMENT_FAKE_WEBHOOK_SECRET/);
+      expect(() =>
+        validateEnv({ ...VALID, PAYMENT_FAKE_WEBHOOK_SECRET: 'short' }),
+      ).toThrow(/PAYMENT_FAKE_WEBHOOK_SECRET/);
+    });
+
+    it('does not allow the fake gateway in production, which moves no real money', () => {
+      expect(() =>
+        validateEnv({
+          ...VALID,
+          NODE_ENV: 'production',
+          RABBITMQ_URL: 'amqp://u:p@broker:5672',
+          EMAIL_PROVIDER: 'smtp',
+          SMTP_HOST: 'smtp.example.com',
+          EMAIL_FROM: 'Ecom <no-reply@example.com>',
+        }),
+      ).toThrow(/PAYMENT_GATEWAY=fake/);
     });
   });
 

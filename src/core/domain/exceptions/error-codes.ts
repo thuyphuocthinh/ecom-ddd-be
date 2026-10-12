@@ -81,6 +81,48 @@ export const OrderErrorCodes = {
   },
 };
 
+export const PaymentErrorCodes = {
+  DOMAIN_EXCEPTION: {
+    code: 'PAY-000',
+    message: 'Payment domain exception',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  INVALID_IDEMPOTENCY_KEY: {
+    code: 'PAY-001',
+    message:
+      'The Idempotency-Key header is required: 8 to 100 characters from A-Z a-z 0-9 _ -',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  NOT_ONLINE: {
+    code: 'PAY-002',
+    message: 'Only an order paid online can be paid here',
+    status: HttpStatus.CONFLICT,
+  },
+  NOT_PAYABLE: {
+    code: 'PAY-003',
+    message:
+      'The order cannot be paid right now: it is not waiting for payment, or a payment is already in progress',
+    status: HttpStatus.CONFLICT,
+  },
+  TOO_MANY_ATTEMPTS: {
+    code: 'PAY-004',
+    message: 'This order has used up its payment attempts',
+    status: HttpStatus.CONFLICT,
+  },
+  TIME_RAN_OUT: {
+    code: 'PAY-005',
+    message:
+      'The time to pay this order has run out, or its stock is no longer held; place a new order',
+    status: HttpStatus.CONFLICT,
+  },
+  GATEWAY_UNAVAILABLE: {
+    code: 'PAY-006',
+    message:
+      'The payment service is temporarily unavailable, please try again later',
+    status: HttpStatus.SERVICE_UNAVAILABLE,
+  },
+};
+
 export const CatalogErrorCodes = {
   DOMAIN_EXCEPTION: {
     code: 'CAT-000',
@@ -206,6 +248,12 @@ export const InventoryErrorCodes = {
     code: 'INV-008',
     message:
       'The stock of this order was not taken out of the warehouse, so there is nothing to put back',
+    status: HttpStatus.CONFLICT,
+  },
+  EXTEND_NOT_ALLOWED: {
+    code: 'INV-009',
+    message:
+      'The stock held for this order cannot be held for longer: it was returned, paid, or has already expired',
     status: HttpStatus.CONFLICT,
   },
   STOCK_UNAVAILABLE: {
