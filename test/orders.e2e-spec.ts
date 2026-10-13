@@ -267,6 +267,7 @@ describe('Orders (e2e)', () => {
       'paymentMethod',
       'shippingAddress',
       'status',
+      'timeline',
       'total',
       'updatedAt',
     ]);
@@ -615,11 +616,18 @@ describe('Orders (e2e)', () => {
         'expiresAt',
         'id',
         'itemCount',
+        'items',
         'paymentMethod',
         'status',
         'total',
       ]);
       expect(res.body.data[0].itemCount).toBe(2);
+      expect(res.body.data[0].items).toHaveLength(2);
+      expect(Object.keys(res.body.data[0].items[0]).sort()).toEqual([
+        'productName',
+        'quantity',
+        'thumbnail',
+      ]);
     });
 
     it.each([0, 51, -1, 'abc', 1.5])(
@@ -654,6 +662,296 @@ describe('Orders (e2e)', () => {
         .query({ cursor: randomUUID() })
         .set(authed(me.token))
         .expect(400);
+    });
+  });
+
+  // ── AC-21, AC-22: filtering and counting ───────────────────────────────────
+
+  describe('filtering and counting my orders (AC-21, AC-22)', () => {
+    const COUNTS = `${ORDERS}/counts`;
+    const listWith = (user: TestUser, query: Record<string, unknown>) =>
+      http().get(ORDERS).query(query).set(authed(user.token));
+    const countsWith = (user: TestUser, query: Record<string, unknown> = {}) =>
+      http().get(COUNTS).query(query).set(authed(user.token));
+    const idsOf = (res: { body: { data: { id: string }[] } }) =>
+      res.body.data.map((o) => o.id);
+    /** A pending online order, a confirmed COD order and a cancelled one. */
+    const threeOrders = async (user: TestUser) => {
+      await inCart(user, 'E_S1');
+      const pending = (
+        await place(user, 'ONLINE', 'filter-key-0001').expect(201)
+      ).body.data.id;
+      await inCart(user, 'E_S2');
+      const confirmed = (
+        await place(user, 'COD', 'filter-key-0002').expect(201)
+      ).body.data.id;
+      await inCart(user, 'E_S2');
+      const cancelled = (
+        await place(user, 'ONLINE', 'filter-key-0003').expect(201)
+      ).body.data.id;
+      await cancel(user, cancelled).expect(200);
+      return { pending, confirmed, cancelled };
+    };
+
+    it('lists by one or several statuses', async () => {
+      const me = await makeUser();
+      const { pending, confirmed, cancelled } = await threeOrders(me);
+
+      const onlyPending = await listWith(me, { status: 'PENDING' }).expect(200);
+      const two = await listWith(me, { status: 'CONFIRMED,CANCELLED' }).expect(
+        200,
+      );
+      const none = await listWith(me, { status: 'DELIVERED' }).expect(200);
+
+      expect(idsOf(onlyPending)).toEqual([pending]);
+      expect(idsOf(two)).toEqual([cancelled, confirmed]);
+      expect(idsOf(none)).toEqual([]);
+    });
+
+    it('lists by a time range, including a moment written with a time zone', async () => {
+      const me = await makeUser();
+      const { pending, confirmed, cancelled } = await threeOrders(me);
+      const hour = 3_600_000;
+      const around = (offset: number) =>
+        new Date(Date.now() + offset).toISOString();
+
+      const inside = await listWith(me, {
+        createdFrom: around(-hour),
+        createdTo: around(hour),
+      }).expect(200);
+      const future = await listWith(me, { createdFrom: around(hour) }).expect(
+        200,
+      );
+      const past = await listWith(me, { createdTo: around(-hour) }).expect(200);
+      // the same moment, one hour ago, written in Vietnam time
+      const local = new Date(Date.now() - hour + 7 * hour)
+        .toISOString()
+        .replace('Z', '+07:00');
+      const written = await listWith(me, { createdFrom: local }).expect(200);
+
+      expect(idsOf(inside)).toEqual([cancelled, confirmed, pending]);
+      expect(idsOf(future)).toEqual([]);
+      expect(idsOf(past)).toEqual([]);
+      expect(idsOf(written)).toEqual([cancelled, confirmed, pending]);
+    });
+
+    it('finds an order by the start of its id, in either case', async () => {
+      const me = await makeUser();
+      const { pending, confirmed } = await threeOrders(me);
+
+      const lower = await listWith(me, { q: confirmed.slice(0, 8) }).expect(
+        200,
+      );
+      const upper = await listWith(me, {
+        q: pending.slice(0, 8).toUpperCase(),
+      }).expect(200);
+      const nobody = await listWith(me, { q: 'ffffffff' }).expect(200);
+
+      expect(idsOf(lower)).toEqual([confirmed]);
+      expect(idsOf(upper)).toEqual([pending]);
+      expect(idsOf(nobody)).toEqual([]);
+    });
+
+    it('takes the filters together, with a cursor, without a repeat or a gap', async () => {
+      const me = await makeUser();
+      const confirmed: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        await inCart(me, 'E_S1');
+        confirmed.push(
+          (await place(me, 'COD', `together-key-000${i}`).expect(201)).body.data
+            .id,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      await inCart(me, 'E_S1');
+      await place(me, 'ONLINE', 'together-key-0099').expect(201);
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const res = await listWith(me, {
+          status: 'CONFIRMED',
+          createdFrom: new Date(Date.now() - 3_600_000).toISOString(),
+          limit: 2,
+          ...(cursor ? { cursor } : {}),
+        }).expect(200);
+        pages++;
+        seen.push(...idsOf(res));
+        cursor = res.body.meta.nextCursor ?? undefined;
+      } while (cursor);
+
+      expect(seen).toEqual([...confirmed].reverse());
+      expect(pages).toBe(3);
+    });
+
+    it('never shows somebody else, whatever the filter', async () => {
+      const me = await makeUser();
+      const other = await makeUser();
+      await inCart(other, 'E_S1');
+      const theirs = (await place(other, 'COD').expect(201)).body.data.id;
+
+      const byCode = await listWith(me, { q: theirs.slice(0, 8) }).expect(200);
+      const byStatus = await listWith(me, { status: 'CONFIRMED' }).expect(200);
+      const counted = await countsWith(me, { q: theirs.slice(0, 8) }).expect(
+        200,
+      );
+
+      expect(idsOf(byCode)).toEqual([]);
+      expect(idsOf(byStatus)).toEqual([]);
+      expect(Object.values(counted.body.data).every((n) => n === 0)).toBe(true);
+    });
+
+    it.each([
+      ['an unknown status', { status: 'NOPE' }],
+      ['an empty status', { status: '' }],
+      ['a lower case status', { status: 'pending' }],
+      ['a date with no time zone', { createdFrom: '2026-10-01T00:00:00' }],
+      ['a date with no time', { createdTo: '2026-10-01' }],
+      ['an id start that is too short', { q: 'abc' }],
+      ['an id start that is not hex', { q: 'xyz12345' }],
+      ['an id start with a quote', { q: "abc123'" }],
+    ])('refuses %s with 400', async (_label, query) => {
+      const me = await makeUser();
+
+      await listWith(me, query).expect(400);
+      if (!('status' in query)) await countsWith(me, query).expect(400);
+    });
+
+    it('refuses a range that ends before it starts, with 400 ORD-000', async () => {
+      const me = await makeUser();
+      const query = {
+        createdFrom: '2026-10-10T00:00:00Z',
+        createdTo: '2026-10-01T00:00:00Z',
+      };
+
+      expect((await listWith(me, query).expect(400)).body.code).toBe('ORD-000');
+      expect((await countsWith(me, query).expect(400)).body.code).toBe(
+        'ORD-000',
+      );
+    });
+
+    it('counts my orders by status: all seven are there, and counts is not taken for an order id', async () => {
+      const me = await makeUser();
+      await threeOrders(me);
+
+      const res = await countsWith(me).expect(200);
+
+      expect(res.body.data).toEqual({
+        PENDING: 1,
+        PAYMENT_PROCESSING: 0,
+        CONFIRMED: 1,
+        SHIPPING: 0,
+        DELIVERED: 0,
+        CANCELLED: 1,
+        EXPIRED: 0,
+      });
+    });
+
+    it('counts inside the same time range and id start as the list, and refuses a status or paging', async () => {
+      const me = await makeUser();
+      const { confirmed } = await threeOrders(me);
+
+      const future = await countsWith(me, {
+        createdFrom: new Date(Date.now() + 3_600_000).toISOString(),
+      }).expect(200);
+      const byCode = await countsWith(me, { q: confirmed.slice(0, 8) }).expect(
+        200,
+      );
+      await countsWith(me, { status: 'PENDING' }).expect(400);
+      await countsWith(me, { limit: 5 }).expect(400);
+      await countsWith(me, { cursor: confirmed }).expect(400);
+
+      expect(Object.values(future.body.data).every((n) => n === 0)).toBe(true);
+      expect(byCode.body.data).toMatchObject({
+        PENDING: 0,
+        CONFIRMED: 1,
+        CANCELLED: 0,
+      });
+    });
+
+    it('needs a token and allows 60 counts a minute, each endpoint on its own', async () => {
+      const me = await makeUser();
+
+      await http().get(COUNTS).expect(401);
+      for (let i = 0; i < 60; i++) await countsWith(me).expect(200);
+      await countsWith(me).expect(429);
+      await listWith(me, {}).expect(200); // the list is counted separately
+    }, 60_000);
+  });
+
+  // ── AC-23: the timeline ────────────────────────────────────────────────────
+
+  describe('the timeline of an order (AC-23)', () => {
+    const NEVER = (id: string, placedAt: string) => ({
+      placedAt,
+      confirmedAt: null,
+      shippedAt: null,
+      deliveredAt: null,
+      cancelledAt: null,
+      expiredAt: null,
+      id,
+    });
+
+    it('shows each time an order reached a status, and nothing for what has not happened', async () => {
+      const admin = await makeUser('ADMIN');
+      const me = await makeUser();
+      await inCart(me, 'E_S1');
+      const placed = await place(me, 'COD').expect(201);
+      const id = placed.body.data.id;
+      const near = (time: string) =>
+        expect(Math.abs(new Date(time).getTime() - Date.now())).toBeLessThan(
+          60_000,
+        );
+
+      // a cash on delivery order is confirmed as it is placed
+      let t = (await get(me, id).expect(200)).body.data.timeline;
+      near(t.confirmedAt);
+      expect(t.placedAt).toBe(placed.body.data.createdAt);
+      expect(t.shippedAt).toBeNull();
+
+      await http()
+        .post(`${ADMIN_ORDERS}/${id}/ship`)
+        .set(authed(admin.token))
+        .expect(200);
+      t = (await get(me, id).expect(200)).body.data.timeline;
+      near(t.shippedAt);
+      expect(t.deliveredAt).toBeNull();
+
+      await http()
+        .post(`${ADMIN_ORDERS}/${id}/deliver`)
+        .set(authed(admin.token))
+        .expect(200);
+      t = (await get(me, id).expect(200)).body.data.timeline;
+      near(t.deliveredAt);
+      expect(t.cancelledAt).toBeNull();
+      expect(new Date(t.confirmedAt) <= new Date(t.shippedAt)).toBe(true);
+      expect(new Date(t.shippedAt) <= new Date(t.deliveredAt)).toBe(true);
+    });
+
+    it('a pending order has none, a cancelled one has its cancel time, and the list carries no timeline', async () => {
+      const me = await makeUser();
+      await inCart(me, 'E_S1');
+      const pending = await place(me, 'ONLINE', 'timeline-key-0001').expect(
+        201,
+      );
+      await inCart(me, 'E_S2');
+      const toCancel = (
+        await place(me, 'ONLINE', 'timeline-key-0002').expect(201)
+      ).body.data.id;
+      await cancel(me, toCancel).expect(200);
+
+      const first = (await get(me, pending.body.data.id).expect(200)).body.data;
+      const second = (await get(me, toCancel).expect(200)).body.data;
+      const list = await http().get(ORDERS).set(authed(me.token)).expect(200);
+
+      expect(first.timeline).toEqual({
+        ...NEVER('', first.createdAt),
+        id: undefined,
+      });
+      expect(second.timeline.cancelledAt).toEqual(expect.any(String));
+      expect(second.timeline.confirmedAt).toBeNull();
+      expect(JSON.stringify(list.body.data)).not.toContain('timeline');
     });
   });
 

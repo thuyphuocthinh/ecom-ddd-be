@@ -29,6 +29,8 @@
 # trả y như vậy), ORD-003 giỏ rỗng, ORD-004 có món không còn bán, ORD-005 Idempotency-Key sai hoặc
 # thiếu, ORD-006 đơn không chuyển được sang trạng thái đó.
 # Giới hạn: POST /orders và POST /orders/:id/cancel 10 lần/phút/user; các request đọc 60 lần/phút/user.
+# Danh sách đơn (request 17 đến 20): lọc theo trạng thái, ngày đặt, mã đơn; GET /orders/counts đếm theo trạng thái.
+# Chi tiết đơn (GET /orders/:id) có thêm `timeline`: lúc đặt và lúc đơn đạt từng trạng thái (null nếu chưa xảy ra).
 # ─────────────────────────────────────────────────────────────────────────────
 
 @baseUrl = http://localhost:3000/api/v1
@@ -46,6 +48,8 @@
 @addressId = {{addresses.response.body.$.data[0].id}}
 @orderId = {{placeOnline.response.body.$.data.id}}
 @codOrderId = {{placeCod.response.body.$.data.id}}
+# Dùng cả id của đơn COD vừa đặt (request 6) làm mã tìm; 8 ký tự đầu của id cũng đủ
+@codeOfOrder = {{placeCod.response.body.$.data.id}}
 
 
 ### 1. Đăng nhập để lấy token (5 lần/15 phút/IP)
@@ -198,3 +202,24 @@ Authorization: Bearer {{adminToken}}
 ### 16. Admin đánh dấu đã giao: SHIPPING → DELIVERED. Sai trạng thái → 409 ORD-006, không có đơn → 404 ORD-002
 POST {{baseUrl}}/admin/orders/{{codOrderId}}/deliver
 Authorization: Bearer {{adminToken}}
+
+
+### 17. Lọc đơn của mình: một hoặc nhiều trạng thái (cách nhau dấu phẩy). Trạng thái lạ → 400
+GET {{baseUrl}}/orders?status=PENDING,PAYMENT_PROCESSING
+Authorization: Bearer {{accessToken}}
+
+
+### 18. Lọc theo ngày đặt: createdFrom và createdTo là thời điểm ISO 8601 CÓ múi giờ (Z hoặc +07:00), lấy cả hai đầu.
+# Thiếu múi giờ hoặc chỉ có ngày (2026-10-01) → 400; createdFrom sau createdTo → 400 ORD-000
+GET {{baseUrl}}/orders?createdFrom=2026-10-01T00:00:00%2B07:00&createdTo=2026-10-31T23:59:59%2B07:00
+Authorization: Bearer {{accessToken}}
+
+
+### 19. Tìm theo mã đơn: mã hiển thị là 8 ký tự đầu của id (không phân biệt hoa thường), gõ từ 6 ký tự. Có thể kết hợp với các bộ lọc khác
+GET {{baseUrl}}/orders?q={{codeOfOrder}}&status=CONFIRMED&limit=10
+Authorization: Bearer {{accessToken}}
+
+
+### 20. Số đơn theo từng trạng thái (cho các tab). Nhận createdFrom, createdTo, q như danh sách; KHÔNG nhận status hay limit
+GET {{baseUrl}}/orders/counts?createdFrom=2026-10-01T00:00:00%2B07:00
+Authorization: Bearer {{accessToken}}

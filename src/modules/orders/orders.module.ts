@@ -23,6 +23,7 @@ import {
   ExpireOrderHandler,
   FindStuckPaymentOrdersHandler,
   GetOrderByIdHandler,
+  CountOrdersByStatusHandler,
 } from './application/index.js';
 import {
   OutboxPublisher,
@@ -50,6 +51,7 @@ const QueryHandlers = [
   ListOrdersHandler,
   FindStuckPaymentOrdersHandler,
   GetOrderByIdHandler,
+  CountOrdersByStatusHandler,
 ];
 
 /**

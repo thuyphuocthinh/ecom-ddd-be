@@ -1,8 +1,12 @@
-import type { Order } from '../../domain/index.js';
+import type { Order, OrderStatusCounts } from '../../domain/index.js';
 import type {
+  OrderCountsResponseDto,
   OrderResponseDto,
   OrderSummaryResponseDto,
 } from '../dtos/order.dto.js';
+
+/** How many items a line of the list shows. */
+const SUMMARY_ITEMS = 3;
 
 /**
  * What the outside world sees of an order. Written out field by field on purpose: the user id, the
@@ -36,6 +40,14 @@ export class OrderViewMapper {
         label: order.shippingAddress.label,
       },
       expiresAt: order.expiresAt,
+      timeline: {
+        placedAt: order.createdAt,
+        confirmedAt: order.timeline.confirmedAt,
+        shippedAt: order.timeline.shippedAt,
+        deliveredAt: order.timeline.deliveredAt,
+        cancelledAt: order.timeline.cancelledAt,
+        expiredAt: order.timeline.expiredAt,
+      },
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
     };
@@ -48,8 +60,25 @@ export class OrderViewMapper {
       paymentMethod: order.paymentMethod,
       total: order.total,
       itemCount: order.itemCount,
+      items: order.items.slice(0, SUMMARY_ITEMS).map((item) => ({
+        productName: item.productName,
+        thumbnail: item.thumbnail,
+        quantity: item.quantity,
+      })),
       createdAt: order.createdAt,
       expiresAt: order.expiresAt,
+    };
+  }
+
+  static toCounts(counts: OrderStatusCounts): OrderCountsResponseDto {
+    return {
+      PENDING: counts.PENDING,
+      PAYMENT_PROCESSING: counts.PAYMENT_PROCESSING,
+      CONFIRMED: counts.CONFIRMED,
+      SHIPPING: counts.SHIPPING,
+      DELIVERED: counts.DELIVERED,
+      CANCELLED: counts.CANCELLED,
+      EXPIRED: counts.EXPIRED,
     };
   }
 }

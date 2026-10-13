@@ -1,4 +1,5 @@
 import { IQuery } from '@nestjs/cqrs';
+import type { OrderListFilters } from '../../domain/index.js';
 
 /** One order of this user. Somebody else's order is the same as no order. */
 export class GetOrderQuery implements IQuery {
@@ -8,12 +9,27 @@ export class GetOrderQuery implements IQuery {
   ) {}
 }
 
-/** The orders of this user, newest first. `cursor` is the id of the last order of the previous page. */
+/**
+ * The orders of this user, newest first, narrowed by `filters` (a status, a time range, the start of
+ * the id). `cursor` is the id of the last order of the previous page.
+ */
 export class ListOrdersQuery implements IQuery {
   constructor(
     public readonly userId: string,
     public readonly limit: number,
     public readonly cursor?: string,
+    public readonly filters: OrderListFilters = {},
+  ) {}
+}
+
+/**
+ * How many of this user's orders are in each status, for the tabs of "my orders". The time range
+ * and the start of the id narrow what is counted; a status filter has no meaning here.
+ */
+export class CountOrdersByStatusQuery implements IQuery {
+  constructor(
+    public readonly userId: string,
+    public readonly filters: OrderListFilters = {},
   ) {}
 }
 

@@ -31,14 +31,17 @@ import {
 } from '@/core/index.js';
 import {
   CancelOrderCommand,
+  CountOrdersByStatusQuery,
   GetOrderQuery,
   ListOrdersQuery,
   PlaceOrderCommand,
   type PlaceOrderResult,
 } from '../../application/index.js';
-import type { Order } from '../../domain/index.js';
+import type { Order, OrderStatusCounts } from '../../domain/index.js';
 import {
+  CountOrdersQueryDto,
   ListOrdersQueryDto,
+  OrderCountsResponseDto,
   OrderResponseDto,
   OrderSummaryResponseDto,
   PlaceOrderDto,
@@ -125,8 +128,16 @@ export class OrderController {
 
   @Get()
   @RateLimit(READ_LIMIT)
-  @ApiOperation({ summary: 'My orders, newest first (cursor pagination)' })
+  @ApiOperation({
+    summary: 'My orders, newest first (cursor pagination)',
+    description:
+      'Narrow the list with `status` (one or more, separated by commas), `createdFrom` and `createdTo` (ISO 8601 with a time zone), and `q` (the start of the order id, for example the 8-character order code).',
+  })
   @ApiResponse({ status: 200, type: [OrderSummaryResponseDto] })
+  @ApiResponse({
+    status: 400,
+    description: 'A bad filter, limit or cursor (VAL-001, ORD-000)',
+  })
   async list(
     @CurrentUser() user: ICurrentUser,
     @Query() query: ListOrdersQueryDto,
@@ -134,8 +145,36 @@ export class OrderController {
     const page = await this.queryBus.execute<
       ListOrdersQuery,
       PaginatedResult<Order>
-    >(new ListOrdersQuery(user.id, query.limit, query.cursor));
+    >(
+      new ListOrdersQuery(
+        user.id,
+        query.limit,
+        query.cursor,
+        query.toFilters(),
+      ),
+    );
     return { data: page.data.map(OrderViewMapper.toSummary), meta: page.meta };
+  }
+
+  // Declared BEFORE `:id`, or "counts" would be taken for an order id
+  @Get('counts')
+  @RateLimit(READ_LIMIT)
+  @ApiOperation({
+    summary: 'How many of my orders are in each status',
+    description:
+      'The same `createdFrom`, `createdTo` and `q` as the list narrow what is counted. Every status is there, 0 when there are none.',
+  })
+  @ApiResponse({ status: 200, type: OrderCountsResponseDto })
+  @ApiResponse({ status: 400, description: 'A bad filter (VAL-001, ORD-000)' })
+  async counts(
+    @CurrentUser() user: ICurrentUser,
+    @Query() query: CountOrdersQueryDto,
+  ): Promise<OrderCountsResponseDto> {
+    const counts = await this.queryBus.execute<
+      CountOrdersByStatusQuery,
+      OrderStatusCounts
+    >(new CountOrdersByStatusQuery(user.id, query.toFilters()));
+    return OrderViewMapper.toCounts(counts);
   }
 
   @Get(':id')
