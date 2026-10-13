@@ -14,7 +14,7 @@
 # Giới hạn: sửa tên 20 lần/15 phút/user; tải ảnh 5 lần/giờ/user; xóa ảnh 20 lần/15 phút/user.
 # ─────────────────────────────────────────────────────────────────────────────
 
-@baseUrl = http://localhost:3000/api/v1
+@baseUrl = http://localhost:4000/api/v1
 @email = thuyphuocthinhtpt+1@gmail.com
 @password = 123456Aa
 

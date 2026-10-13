@@ -33,7 +33,7 @@
 # Chi tiết đơn (GET /orders/:id) có thêm `timeline`: lúc đặt và lúc đơn đạt từng trạng thái (null nếu chưa xảy ra).
 # ─────────────────────────────────────────────────────────────────────────────
 
-@baseUrl = http://localhost:3000/api/v1
+@baseUrl = http://localhost:4000/api/v1
 @email = thuyphuocthinhtpt+1@gmail.com
 @adminEmail = thuyphuocthinhtpt+1@gmail.com
 @password = 123456Aa

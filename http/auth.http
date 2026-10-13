@@ -18,7 +18,7 @@
 # lần/15 phút/IP. Đừng bấm liên tục; dùng lại token đã lấy (access token sống 15 phút).
 # ─────────────────────────────────────────────────────────────────────────────
 
-@baseUrl = http://localhost:3000/api/v1
+@baseUrl = http://localhost:4000/api/v1
 @email = thuyphuocthinhtpt+1@gmail.com
 @password = 123456Aa
 

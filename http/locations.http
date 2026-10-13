@@ -8,7 +8,7 @@
 #   Chưa nạp thì danh sách tỉnh trả về rỗng.
 # ─────────────────────────────────────────────────────────────────────────────
 
-@baseUrl = http://localhost:3000/api/v1
+@baseUrl = http://localhost:4000/api/v1
 
 ### 1. Danh sách 34 tỉnh/thành (xếp theo thứ tự chữ cái tiếng Việt)
 # @name provinces

@@ -28,6 +28,9 @@ async function bootstrap() {
     origin: rawOrigins ? rawOrigins.split(',').map((o) => o.trim()) : '*',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    // A browser on another origin can only read these response headers if they are listed: a
+    // repeated request is told apart from a new one by Idempotency-Replayed
+    exposedHeaders: ['Idempotency-Replayed'],
     credentials: false, // tokens are in body, not cookies
   });
 
