@@ -651,4 +651,436 @@ describe('CatalogController (e2e)', () => {
         .expect(400); // CAT-003 INVALID_PUBLISH
     });
   });
+  // ── search, stock labels and discounts (AC-24 to AC-33) ────────────────────
+
+  describe('searching the public list (AC-24 to AC-33)', () => {
+    const get = (path: string) =>
+      request(app.getHttpServer()).get(`${PUBLIC}${path}`);
+    /** A published product with the SKUs given: its price, original price and units on hand. */
+    const make = async (
+      categoryId: string,
+      name: string,
+      skus: { price: number; compareAtPrice?: number; onHand?: number }[],
+      options: { publish?: boolean; description?: string } = {},
+    ) => {
+      const created = await request(app.getHttpServer())
+        .post(`${ADMIN}/products`)
+        .send({
+          categoryId,
+          name,
+          description: options.description,
+          skus: skus.map((sku, i) => ({
+            skuCode: `SRCH-${++skuCounter}-${i}`,
+            price: sku.price,
+            compareAtPrice: sku.compareAtPrice,
+            attributes: { n: String(i) },
+          })),
+        })
+        .expect(201);
+      const id: string = created.body.data.id;
+      if (options.publish !== false) {
+        await request(app.getHttpServer())
+          .patch(`${ADMIN}/products/${id}/publish`)
+          .expect(200);
+      }
+      const detail = await prismaService.sku.findMany({
+        where: { productId: id },
+        orderBy: { skuCode: 'asc' },
+      });
+      for (const [i, sku] of skus.entries()) {
+        if (sku.onHand !== undefined) {
+          await prismaService.skuStock.create({
+            data: { skuId: detail[i].id, onHand: sku.onHand },
+          });
+        }
+      }
+      return { id, skuIds: detail.map((d) => d.id) };
+    };
+    const names = (res: { body: { data: { name: string }[] } }) =>
+      res.body.data.map((p) => p.name);
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+    it('lists the newest product first, and each product says what a storefront needs (AC-24, AC-27, AC-29, AC-30)', async () => {
+      const cat = await createCategory('Audio');
+      await make(cat, 'Old', [{ price: 100, onHand: 1 }]);
+      await pause();
+      await make(cat, 'Aero 2', [
+        { price: 3_990_000, compareAtPrice: 4_590_000, onHand: 4 },
+        { price: 4_500_000, onHand: 0 },
+      ]);
+
+      const res = await get('/products').expect(200);
+
+      expect(names(res)).toEqual(['Aero 2', 'Old']);
+      const aero = res.body.data[0];
+      expect(aero).toMatchObject({
+        minPrice: 3_990_000,
+        onSale: true,
+        discountPercent: 13,
+        inStock: true,
+      });
+      expect(
+        aero.skus.map((x: any) => [
+          x.price,
+          x.compareAtPrice,
+          x.discountPercent,
+          x.inStock,
+        ]),
+      ).toEqual([
+        [3_990_000, 4_590_000, 13, true],
+        [4_500_000, null, 0, false],
+      ]);
+      expect(Object.keys(res.body.meta).sort()).toEqual([
+        'hasMore',
+        'nextCursor',
+      ]);
+    });
+
+    it('goes through the pages with a cursor, once each (AC-24)', async () => {
+      const cat = await createCategory('Cursor');
+      for (const n of ['a', 'b', 'c', 'd', 'e']) {
+        await make(cat, `Item ${n}`, [{ price: 10 }]);
+        await pause();
+      }
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const res = await get('/products')
+          .query({ limit: 2, ...(cursor ? { cursor } : {}) })
+          .expect(200);
+        seen.push(...names(res));
+        cursor = res.body.meta.nextCursor ?? undefined;
+      } while (cursor);
+
+      expect(seen).toEqual(['Item e', 'Item d', 'Item c', 'Item b', 'Item a']);
+    });
+
+    it('reads numbered pages with the total, and sorts by price either way (AC-25, AC-26)', async () => {
+      const cat = await createCategory('Pages');
+      for (const [name, price] of [
+        ['p1', 300],
+        ['p2', 100],
+        ['p3', 200],
+        ['p4', 500],
+        ['p5', 400],
+      ] as const) {
+        await make(cat, name, [{ price }]);
+      }
+
+      const page2 = await get('/products')
+        .query({ page: 2, limit: 2, sort: 'price_asc' })
+        .expect(200);
+      const page3 = await get('/products')
+        .query({ page: 3, limit: 2, sort: 'price_asc' })
+        .expect(200);
+      const desc = await get('/products')
+        .query({ page: 1, limit: 5, sort: 'price_desc' })
+        .expect(200);
+
+      expect(names(page2)).toEqual(['p1', 'p5']);
+      expect(page2.body.meta).toEqual({
+        page: 2,
+        limit: 2,
+        hasMore: true,
+        total: 5,
+        totalCapped: false,
+      });
+      expect(names(page3)).toEqual(['p4']);
+      expect(page3.body.meta.hasMore).toBe(false);
+      expect(names(desc)).toEqual(['p4', 'p5', 'p1', 'p3', 'p2']);
+    });
+
+    it('sorts by relevance when there is a search (AC-26)', async () => {
+      const cat = await createCategory('Relevance');
+      await make(cat, 'Headphones', [{ price: 10 }], {
+        description: 'headphones',
+      });
+      await make(cat, 'Headphones headphones headphones', [{ price: 10 }], {
+        description: 'headphones headphones',
+      });
+      await make(cat, 'Speaker', [{ price: 10 }]);
+
+      const res = await get('/products')
+        .query({ search: 'headphones', sort: 'relevance', page: 1 })
+        .expect(200);
+
+      expect(names(res)).toEqual([
+        'Headphones headphones headphones',
+        'Headphones',
+      ]);
+    });
+
+    it('filters by stock and by discount, and a draft is never counted (AC-28, AC-29, AC-30, AC-33)', async () => {
+      const cat = await createCategory('Filters');
+      await make(cat, 'In stock', [{ price: 10, onHand: 3 }]);
+      await make(cat, 'Sold out', [{ price: 10, onHand: 0 }]);
+      await make(cat, 'On sale', [
+        { price: 10, compareAtPrice: 20, onHand: 1 },
+      ]);
+      await make(
+        cat,
+        'Hidden draft',
+        [{ price: 10, compareAtPrice: 20, onHand: 1 }],
+        { publish: false },
+      );
+
+      const inStock = await get('/products')
+        .query({ inStock: 'true', page: 1 })
+        .expect(200);
+      const onSale = await get('/products')
+        .query({ onSale: 'true', page: 1 })
+        .expect(200);
+      const both = await get('/products')
+        .query({ inStock: 'true', onSale: 'true', page: 1 })
+        .expect(200);
+      const all = await get('/products').query({ page: 1 }).expect(200);
+
+      expect(names(inStock).sort()).toEqual(['In stock', 'On sale']);
+      expect(names(onSale)).toEqual(['On sale']);
+      expect(names(both)).toEqual(['On sale']);
+      expect(all.body.meta.total).toBe(3);
+      expect(
+        all.body.data.find((p: any) => p.name === 'Sold out').inStock,
+      ).toBe(false);
+    });
+
+    it.each([
+      ['page together with cursor', { page: 1, cursor: 'x' }, 'CAT-017'],
+      [
+        'a cursor with another sort',
+        { cursor: 'x', sort: 'price_asc' },
+        'CAT-017',
+      ],
+      ['relevance with no search', { page: 1, sort: 'relevance' }, 'CAT-017'],
+      [
+        'a page past the first 1000 results',
+        { page: 21, limit: 50 },
+        'CAT-017',
+      ],
+      [
+        'a cursor that is not a product',
+        { cursor: 'no-such-product' },
+        'CAT-017',
+      ],
+      ['an unknown sort', { sort: 'cheapest' }, 'VAL-001'],
+      ['inStock=false', { inStock: 'false' }, 'VAL-001'],
+      ['onSale=1', { onSale: '1' }, 'VAL-001'],
+      ['limit 51', { limit: 51 }, 'VAL-001'],
+      ['page 0', { page: 0 }, 'VAL-001'],
+    ])('refuses %s with 400', async (_label, query, code) => {
+      const res = await get('/products').query(query).expect(400);
+
+      expect(res.body.code).toBe(code);
+    });
+
+    it('shows the stock in the detail of a product even right after it was cached, and not for a hidden one (AC-29)', async () => {
+      const cat = await createCategory('Detail');
+      const { id, skuIds } = await make(cat, 'Cached', [
+        { price: 10, onHand: 2 },
+      ]);
+
+      const first = await get(`/products/${id}`).expect(200);
+      await prismaService.skuStock.update({
+        where: { skuId: skuIds[0] },
+        data: { onHand: 0 },
+      });
+      const second = await get(`/products/${id}`).expect(200);
+
+      expect(first.body.data).toMatchObject({ inStock: true, minPrice: 10 });
+      expect(first.body.data.skus[0].inStock).toBe(true);
+      expect(second.body.data.inStock).toBe(false);
+      expect(second.body.data.skus[0].inStock).toBe(false);
+    });
+
+    it('counts the products of each category, below it included; facets is not taken for a product id (AC-31)', async () => {
+      const audio = await createCategory('Audio');
+      const earbuds = await createCategory('Earbuds', audio);
+      const bags = await createCategory('Bags');
+      await createCategory('Nothing');
+      await make(earbuds, 'Aero', [{ price: 10, onHand: 1 }]);
+      await make(audio, 'Speaker', [{ price: 10, onHand: 0 }]);
+      await make(bags, 'Backpack', [{ price: 10, onHand: 1 }]);
+      await make(bags, 'Draft bag', [{ price: 10, onHand: 1 }], {
+        publish: false,
+      });
+
+      const roots = await get('/products/facets').expect(200);
+      const stocked = await get('/products/facets')
+        .query({ inStock: 'true' })
+        .expect(200);
+      const below = await get('/products/facets')
+        .query({ parentId: audio })
+        .expect(200);
+      const nobody = await get('/products/facets')
+        .query({ parentId: 'no-such' })
+        .expect(200);
+      const byName = (res: {
+        body: { data: { name: string; count: number }[] };
+      }) => Object.fromEntries(res.body.data.map((c) => [c.name, c.count]));
+
+      expect(byName(roots)).toEqual({ Audio: 2, Bags: 1, Nothing: 0 });
+      expect(byName(stocked)).toEqual({ Audio: 1, Bags: 1, Nothing: 0 });
+      expect(byName(below)).toEqual({ Earbuds: 1 });
+      expect(nobody.body.data).toEqual([]);
+      expect(Object.keys(roots.body.data[0]).sort()).toEqual([
+        'categoryId',
+        'count',
+        'name',
+      ]);
+      for (const query of [
+        { categoryId: audio },
+        { sort: 'price_asc' },
+        { page: 1 },
+        { cursor: 'x' },
+        { limit: 5 },
+        { onSale: 'false' },
+      ]) {
+        await get('/products/facets').query(query).expect(400);
+      }
+    });
+
+    it('lets the admin set, change and remove the price before a discount; money stays at price (AC-30)', async () => {
+      const cat = await createCategory('Sale');
+      const { id, skuIds } = await make(cat, 'Aero 2', [{ price: 4_590_000 }]);
+      const priceUrl = `${ADMIN}/products/${id}/skus/${skuIds[0]}/price`;
+
+      const set = await request(app.getHttpServer())
+        .patch(priceUrl)
+        .send({ price: 3_990_000, compareAtPrice: 4_590_000 })
+        .expect(200);
+      expect(set.body.data.skus[0]).toMatchObject({
+        price: 3_990_000,
+        compareAtPrice: 4_590_000,
+        discountPercent: 13,
+      });
+      expect(set.body.data.skus[0]).not.toHaveProperty('inStock'); // the admin sees no storefront flags
+      expect(set.body.data.onSale).toBe(true);
+
+      // leaving it out keeps it
+      const kept = await request(app.getHttpServer())
+        .patch(priceUrl)
+        .send({ price: 3_900_000 })
+        .expect(200);
+      expect(kept.body.data.skus[0]).toMatchObject({
+        price: 3_900_000,
+        compareAtPrice: 4_590_000,
+      });
+
+      // the storefront shows it, and the cart-facing price is the selling price
+      const shown = await get(`/products/${id}`).expect(200);
+      expect(shown.body.data.skus[0]).toMatchObject({
+        price: 3_900_000,
+        compareAtPrice: 4_590_000,
+      });
+
+      // a price that reaches the original, or an original that is not above, is refused
+      for (const body of [
+        { price: 4_590_000 },
+        { price: 5_000_000 },
+        { price: 3_900_000, compareAtPrice: 3_900_000 },
+        { price: 3_900_000, compareAtPrice: 100 },
+      ]) {
+        const res = await request(app.getHttpServer())
+          .patch(priceUrl)
+          .send(body)
+          .expect(400);
+        expect(res.body.code).toBe('CAT-018');
+      }
+      expect((await get(`/products/${id}`)).body.data.skus[0].price).toBe(
+        3_900_000,
+      );
+
+      // null removes the discount, and then the price may go up past the old original
+      const removed = await request(app.getHttpServer())
+        .patch(priceUrl)
+        .send({ price: 5_000_000, compareAtPrice: null })
+        .expect(200);
+      expect(removed.body.data.skus[0]).toMatchObject({
+        price: 5_000_000,
+        compareAtPrice: null,
+        discountPercent: 0,
+      });
+      expect(removed.body.data.onSale).toBe(false);
+      await request(app.getHttpServer())
+        .patch(priceUrl)
+        .send({ price: 1, compareAtPrice: 'cheap' })
+        .expect(400);
+    });
+
+    it('takes the price before a discount when a product or a SKU is created (AC-30)', async () => {
+      const cat = await createCategory('Create');
+      const { id } = await make(cat, 'With original', [
+        { price: 100, compareAtPrice: 150 },
+      ]);
+      const added = await request(app.getHttpServer())
+        .post(`${ADMIN}/products/${id}/skus`)
+        .send({
+          skuCode: `ADD-${Date.now()}`,
+          price: 200,
+          compareAtPrice: 260,
+          attributes: { size: 'L' },
+        })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`${ADMIN}/products/${id}/skus`)
+        .send({
+          skuCode: `BAD-${Date.now()}`,
+          price: 200,
+          compareAtPrice: 200,
+          attributes: { size: 'XL' },
+        })
+        .expect(400);
+      await request(app.getHttpServer())
+        .post(`${ADMIN}/products`)
+        .send({
+          categoryId: cat,
+          name: 'Bad',
+          skus: [
+            {
+              skuCode: `B-${Date.now()}`,
+              price: 10,
+              compareAtPrice: 5,
+              attributes: {},
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(added.body.data.compareAtPrice).toBe(260);
+      expect((await get(`/products/${id}`)).body.data).toMatchObject({
+        minPrice: 100,
+        onSale: true,
+        discountPercent: 33,
+      });
+    });
+
+    it('does not change the admin list: no page, sort, inStock or onSale, and the cursor still works (AC-32)', async () => {
+      const cat = await createCategory('Admin');
+      await make(cat, 'One', [{ price: 10 }]);
+      await make(cat, 'Draft', [{ price: 10 }], { publish: false });
+
+      const list = await request(app.getHttpServer())
+        .get(`${ADMIN}/products`)
+        .expect(200);
+
+      expect(list.body.data).toHaveLength(2);
+      expect(Object.keys(list.body.meta).sort()).toEqual([
+        'hasMore',
+        'nextCursor',
+      ]);
+      expect(list.body.data[0]).not.toHaveProperty('inStock');
+      for (const query of [
+        { page: 1 },
+        { sort: 'price_asc' },
+        { inStock: 'true' },
+        { onSale: 'true' },
+        { limit: 51 },
+      ]) {
+        await request(app.getHttpServer())
+          .get(`${ADMIN}/products`)
+          .query(query)
+          .expect(400);
+      }
+    });
+  });
 });

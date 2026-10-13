@@ -245,3 +245,46 @@ Content-Type: application/json
 ### 20. Xoá một SKU
 DELETE {{baseUrl}}/admin/catalog/products/{{productId}}/skus/{{newSkuId}}
 Authorization: Bearer {{adminToken}}
+
+
+### 21. Đặt giảm giá: `compareAtPrice` là giá TRƯỚC khi giảm (hiện gạch ngang), phải LỚN HƠN price, không thì 400 CAT-018.
+# Chỉ để hiển thị: giỏ hàng, đơn hàng và thanh toán vẫn tính theo `price`. Là số = đặt, null = bỏ giảm giá, bỏ trống = giữ nguyên.
+PATCH {{baseUrl}}/admin/catalog/products/{{productId}}/skus/{{skuId}}/price
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "price": 189000,
+  "compareAtPrice": 249000
+}
+
+
+### 22. Bỏ giảm giá
+PATCH {{baseUrl}}/admin/catalog/products/{{productId}}/skus/{{skuId}}/price
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "price": 249000,
+  "compareAtPrice": null
+}
+
+
+### 23. Danh sách công khai, mới nhất trước (mặc định). Mỗi sản phẩm và mỗi SKU có `inStock` (còn hàng: onHand > 0, KHÔNG trừ hàng đang giữ),
+# sản phẩm có `minPrice`, `onSale`, `discountPercent`. "Xem thêm" dùng `cursor` (chỉ với sort=newest); limit 1 đến 50.
+GET {{baseUrl}}/catalog/products?limit=20
+
+
+### 24. Phân trang theo SỐ TRANG (cho trang tìm kiếm): meta có page, limit, hasMore, total (đếm tối đa 1000), totalCapped.
+# page * limit không được quá 1000 (400 CAT-017); không dùng cùng cursor (400 CAT-017).
+GET {{baseUrl}}/catalog/products?page=1&limit=20&sort=price_asc
+
+
+### 25. Tìm kiếm + bộ lọc + sắp xếp theo độ liên quan (relevance cần có search, không thì 400 CAT-017).
+# inStock và onSale chỉ nhận "true" (giá trị khác → 400). categoryId lấy cả cây con.
+GET {{baseUrl}}/catalog/products?search=ao&sort=relevance&page=1&inStock=true&onSale=true&minPrice=100000&maxPrice=500000
+
+
+### 26. Số sản phẩm theo danh mục (cho bộ lọc bên cạnh kết quả): danh mục gốc, mỗi danh mục tính cả cây con. Thêm parentId để xem danh mục con.
+# Nhận search, minPrice, maxPrice, inStock, onSale; KHÔNG nhận categoryId, sort, page, cursor, limit
+GET {{baseUrl}}/catalog/products/facets?inStock=true

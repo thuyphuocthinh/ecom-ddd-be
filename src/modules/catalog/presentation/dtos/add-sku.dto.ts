@@ -21,6 +21,15 @@ export class AddSkuDto {
   @Min(0)
   price: number;
 
+  @ApiPropertyOptional({
+    description:
+      'The price before a discount (shown crossed out); must be greater than price. Display only: money is always charged at price',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice?: number;
+
   @ApiProperty()
   @IsObject()
   @IsNotEmpty()

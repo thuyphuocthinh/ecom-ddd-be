@@ -15,15 +15,23 @@ import {
   ApiExtraModels,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { GetProductsDto } from '../dtos/get-products.dto.js';
-import { ProductResponseDto } from '../dtos/product-response.dto.js';
+import { SearchProductsDto } from '../dtos/search-products.dto.js';
+import { FacetsQueryDto } from '../dtos/facets-query.dto.js';
+import {
+  CategoryProductCountResponseDto,
+  PageMetaResponseDto,
+  ProductResponseDto,
+} from '../dtos/product-response.dto.js';
 import { ProductMapper } from '../mappers/product.mapper.js';
 import {
-  GetProductsQuery,
+  GetProductFacetsQuery,
   GetPublishedProductByIdQuery,
+  SearchProductsQuery,
+  type ProductSearchResult,
+  type PublishedProductView,
 } from '../../application/index.js';
-import { Product, ProductStatus } from '../../domain/index.js';
-import { PaginatedResult, PaginatedResponseDto } from '@/core/index.js';
+import type { CategoryProductCount } from '../../domain/index.js';
+import { PaginatedResponseDto } from '@/core/index.js';
 
 /**
  * The public storefront: no login needed, and only PUBLISHED products are ever
@@ -32,13 +40,22 @@ import { PaginatedResult, PaginatedResponseDto } from '@/core/index.js';
  */
 @ApiTags('Catalog - Products')
 @Controller('catalog/products')
-@ApiExtraModels(PaginatedResponseDto, ProductResponseDto)
+@ApiExtraModels(
+  PaginatedResponseDto,
+  PageMetaResponseDto,
+  ProductResponseDto,
+  CategoryProductCountResponseDto,
+)
 export class ProductController {
   constructor(private readonly queryBus: QueryBus) {}
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get list of published products' })
+  @ApiOperation({
+    summary: 'Get list of published products',
+    description:
+      'Newest first unless `sort` says otherwise. Read it by `cursor` ("load more", newest only; `meta` has `hasMore` and `nextCursor`) or by `page` (a numbered page, any sort; `meta` has `page`, `limit`, `hasMore`, `total` counted up to 1000, and `totalCapped`). Each SKU and each product says whether it is in stock.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Products retrieved successfully',
@@ -51,28 +68,67 @@ export class ProductController {
               type: 'array',
               items: { $ref: getSchemaPath(ProductResponseDto) },
             },
+            meta: { $ref: getSchemaPath(PageMetaResponseDto) },
           },
         },
       ],
     },
   })
-  async getProducts(@Query() queryDto: GetProductsDto) {
-    const query = new GetProductsQuery(
-      queryDto.limit,
-      queryDto.cursor,
-      queryDto.categoryId,
-      queryDto.search,
-      ProductStatus.PUBLISHED, // fixed here: the customer cannot choose it
-      queryDto.minPrice,
-      queryDto.maxPrice,
+  @ApiResponse({
+    status: 400,
+    description:
+      'A bad parameter (VAL-001), or options that cannot go together (CAT-017): page with cursor, cursor with another sort, relevance without search, a page past the first 1000 results, a cursor that is not a product',
+  })
+  async getProducts(@Query() dto: SearchProductsDto) {
+    const { data, meta, inStockSkuIds } = await this.queryBus.execute<
+      SearchProductsQuery,
+      ProductSearchResult
+    >(
+      new SearchProductsQuery({
+        limit: dto.limit,
+        page: dto.page,
+        cursor: dto.cursor,
+        sort: dto.sort,
+        categoryId: dto.categoryId,
+        search: dto.search,
+        minPrice: dto.minPrice,
+        maxPrice: dto.maxPrice,
+        inStock: dto.inStock === 'true' ? true : undefined,
+        onSale: dto.onSale === 'true' ? true : undefined,
+      }),
     );
+    return {
+      data: data.map((product) =>
+        ProductMapper.toPublicResponse(product, inStockSkuIds),
+      ),
+      meta,
+    };
+  }
 
-    const result = await this.queryBus.execute<
-      GetProductsQuery,
-      PaginatedResult<Product>
-    >(query);
-
-    return PaginatedResponseDto.map(result, ProductMapper.toResponse);
+  // Declared BEFORE `:id`, or "facets" would be taken for a product id
+  @Get('facets')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'How many published products each category holds',
+    description:
+      'The categories directly under `parentId` (the root categories when left out), each with the products in it and in every category below it, inside the filters.',
+  })
+  @ApiResponse({
+    status: 200,
+    type: [CategoryProductCountResponseDto],
+  })
+  async getFacets(
+    @Query() dto: FacetsQueryDto,
+  ): Promise<CategoryProductCountResponseDto[]> {
+    return this.queryBus.execute<GetProductFacetsQuery, CategoryProductCount[]>(
+      new GetProductFacetsQuery(dto.parentId ?? null, {
+        search: dto.search,
+        minPrice: dto.minPrice,
+        maxPrice: dto.maxPrice,
+        inStock: dto.inStock === 'true' ? true : undefined,
+        onSale: dto.onSale === 'true' ? true : undefined,
+      }),
+    );
   }
 
   @Get(':id')
@@ -85,11 +141,10 @@ export class ProductController {
     description: 'Product not found, or not published',
   })
   async getProductById(@Param('id') id: string) {
-    const query = new GetPublishedProductByIdQuery(id);
-    const product = await this.queryBus.execute<
+    const { product, inStockSkuIds } = await this.queryBus.execute<
       GetPublishedProductByIdQuery,
-      Product
-    >(query);
-    return ProductMapper.toResponse(product);
+      PublishedProductView
+    >(new GetPublishedProductByIdQuery(id));
+    return ProductMapper.toPublicResponse(product, inStockSkuIds);
   }
 }

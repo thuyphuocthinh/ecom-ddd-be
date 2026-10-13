@@ -1,14 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString } from 'class-validator';
-import { Type } from 'class-transformer';
-import { PaginationQueryDto } from '@/core/index.js';
+import { IsOptional, IsString } from 'class-validator';
+import { WithCursorPagination } from '@/core/index.js';
+import { ProductFilterDto } from './product-filter.dto.js';
 
 /**
- * The public product list. It has no `status` on purpose: customers only ever
- * get PUBLISHED products, and the global ValidationPipe rejects a `status`
- * query parameter as an unknown field. Admins use `AdminGetProductsDto`.
+ * The product list of the admin (`AdminGetProductsDto` adds `status`): a word, a price range, a
+ * category, and a cursor. It has no `status` here and no sort, page, stock or discount filters:
+ * the global ValidationPipe rejects what is not declared. The public list is `SearchProductsDto`.
  */
-export class GetProductsDto extends PaginationQueryDto {
+export class GetProductsDto extends WithCursorPagination(ProductFilterDto) {
   @ApiPropertyOptional({
     description:
       'Filter products by category ID. Includes the products of every sub-category.',
@@ -16,23 +16,4 @@ export class GetProductsDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   categoryId?: string;
-
-  @ApiPropertyOptional({
-    description: 'Search products by name or description',
-  })
-  @IsOptional()
-  @IsString()
-  search?: string;
-
-  @ApiPropertyOptional({ description: 'Minimum price filter' })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  minPrice?: number;
-
-  @ApiPropertyOptional({ description: 'Maximum price filter' })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  maxPrice?: number;
 }

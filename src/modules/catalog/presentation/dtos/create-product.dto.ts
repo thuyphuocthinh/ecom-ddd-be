@@ -18,6 +18,16 @@ export class SkuDto {
   @Min(0)
   price: number;
 
+  @ApiPropertyOptional({
+    example: 180000,
+    description:
+      'Giá trước khi giảm (hiển thị gạch ngang); phải lớn hơn price. Chỉ để hiển thị, tiền vẫn tính theo price',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice?: number;
+
   @ApiProperty({
     example: { color: 'Red', size: 'XL' },
     description: 'Thuộc tính cấu hình của SKU',

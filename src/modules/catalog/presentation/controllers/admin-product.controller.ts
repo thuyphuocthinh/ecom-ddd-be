@@ -232,12 +232,14 @@ export class AdminProductController {
       dto.price,
       dto.attributes,
       dto.barcode,
+      dto.compareAtPrice,
     );
     const sku = await this.commandBus.execute<AddSkuCommand, Sku>(command);
     return {
       id: sku.id,
       skuCode: sku.skuCode,
       price: sku.price.amount,
+      compareAtPrice: sku.compareAtPrice?.amount ?? null,
       attributes: sku.attributes.toPlainObject(),
       barcode: sku.barcode,
     };
@@ -267,7 +269,12 @@ export class AdminProductController {
     @Param('skuId') skuId: string,
     @Body() dto: UpdateSkuPriceDto,
   ) {
-    const command = new UpdateSkuPriceCommand(id, skuId, dto.price);
+    const command = new UpdateSkuPriceCommand(
+      id,
+      skuId,
+      dto.price,
+      dto.compareAtPrice,
+    );
     const product = await this.commandBus.execute<
       UpdateSkuPriceCommand,
       Product
