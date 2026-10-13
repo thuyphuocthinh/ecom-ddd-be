@@ -39,6 +39,13 @@ export class OrderMapper {
       expiresAt: row.expiresAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      timeline: {
+        confirmedAt: row.confirmedAt,
+        shippedAt: row.shippedAt,
+        deliveredAt: row.deliveredAt,
+        cancelledAt: row.cancelledAt,
+        expiredAt: row.expiredAt,
+      },
     });
   }
 }

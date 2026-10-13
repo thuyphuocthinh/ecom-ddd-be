@@ -330,6 +330,13 @@ model Order {
   total              Decimal       @db.Decimal(12, 2)
   shippingAddress    Json
   expiresAt          DateTime
+  // When the order reached each of these statuses, by the database clock, written in the same
+  // UPDATE that moves the status. Empty until it happens (and for orders from before they existed).
+  confirmedAt        DateTime?
+  shippedAt          DateTime?
+  deliveredAt        DateTime?
+  cancelledAt        DateTime?
+  expiredAt          DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 

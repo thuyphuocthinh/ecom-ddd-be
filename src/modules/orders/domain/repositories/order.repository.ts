@@ -1,6 +1,7 @@
 import type { PaginatedResult } from '@/core/index.js';
 import type { Order } from '../entities/order.entity.js';
 import type { OutboxEventDraft } from '../events/order-events.js';
+import type { OrderListFilters, OrderStatusCounts } from '../order-filters.js';
 import type { OrderStatus } from '../order-status.js';
 
 /** Thrown by `create` when an order with this id, or this user and key, already exists. */
@@ -30,14 +31,26 @@ export interface IOrderRepository {
   findByIdForUser(userId: string, orderId: string): Promise<Order | null>;
 
   /**
-   * The user's orders, newest first. `cursor` is the id of the last order of the previous page
-   * and must be an order of this user (otherwise `null` is returned for the page, see below).
+   * The user's orders, newest first, narrowed by `filters` (all that are given must hold; only
+   * ever this user's orders). `cursor` is the id of the last order of the previous page and must
+   * be an order of this user (otherwise `null` is returned for the page, see below); it is only a
+   * position, so the filters may differ from one page to the next.
    */
   listByUser(
     userId: string,
     limit: number,
     cursor?: string,
+    filters?: OrderListFilters,
   ): Promise<PaginatedResult<Order> | null>;
+
+  /**
+   * How many of the user's orders are in each status. `filters.statuses` is ignored (the point is
+   * to count every status); the dates and the code narrow what is counted.
+   */
+  countByStatus(
+    userId: string,
+    filters?: OrderListFilters,
+  ): Promise<OrderStatusCounts>;
 
   /**
    * Writes the order, its items and its event in one transaction: all three or none. Throws

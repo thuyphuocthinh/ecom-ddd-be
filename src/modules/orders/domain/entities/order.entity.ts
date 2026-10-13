@@ -6,6 +6,7 @@ import {
   PaymentMethod,
   canTransition,
 } from '../order-status.js';
+import { emptyTimeline, type OrderTimeline } from '../order-timeline.js';
 import {
   computeTotal,
   deriveOrderId,
@@ -78,6 +79,8 @@ export class Order {
     public readonly expiresAt: Date,
     public readonly createdAt: Date,
     public readonly updatedAt: Date,
+    /** When it reached each status (empty until it happens). */
+    public readonly timeline: OrderTimeline = emptyTimeline(),
   ) {}
 
   /**
@@ -174,6 +177,7 @@ export class Order {
     expiresAt: Date;
     createdAt: Date;
     updatedAt: Date;
+    timeline?: OrderTimeline;
   }): Order {
     return new Order(
       data.id,
@@ -189,6 +193,7 @@ export class Order {
       data.expiresAt,
       data.createdAt,
       data.updatedAt,
+      data.timeline ?? emptyTimeline(),
     );
   }
 

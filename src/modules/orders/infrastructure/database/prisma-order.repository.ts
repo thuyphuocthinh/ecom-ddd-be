@@ -3,10 +3,14 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService, type PaginatedResult } from '@/core/index.js';
 import {
+  ALL_ORDER_STATUSES,
   Order,
   OrderAlreadyExistsError,
+  TIMELINE_COLUMN,
   type IOrderRepository,
+  type OrderListFilters,
   type OrderStatus,
+  type OrderStatusCounts,
   type OutboxEventDraft,
   type TransitionOptions,
 } from '../../domain/index.js';
@@ -50,6 +54,7 @@ export class PrismaOrderRepository implements IOrderRepository {
     userId: string,
     limit: number,
     cursor?: string,
+    filters: OrderListFilters = {},
   ): Promise<PaginatedResult<Order> | null> {
     if (cursor !== undefined) {
       // A cursor that is not an order of this user is refused, so it can never be used to probe
@@ -61,7 +66,7 @@ export class PrismaOrderRepository implements IOrderRepository {
     }
 
     const rows = await this.prisma.order.findMany({
-      where: { userId },
+      where: this.listWhere(userId, filters),
       include: { items: true },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
@@ -75,6 +80,49 @@ export class PrismaOrderRepository implements IOrderRepository {
         hasMore,
         nextCursor: hasMore ? page[page.length - 1].id : null,
       },
+    };
+  }
+
+  async countByStatus(
+    userId: string,
+    filters: OrderListFilters = {},
+  ): Promise<OrderStatusCounts> {
+    // The status is what is being counted, so a status filter is left out here
+    const rows = await this.prisma.order.groupBy({
+      by: ['status'],
+      where: this.listWhere(userId, { ...filters, statuses: undefined }),
+      _count: { _all: true },
+    });
+    const counts = Object.fromEntries(
+      ALL_ORDER_STATUSES.map((status) => [status, 0]),
+    ) as OrderStatusCounts;
+    for (const row of rows) counts[row.status as OrderStatus] = row._count._all;
+    return counts;
+  }
+
+  /**
+   * The `where` of the list and of the count. It ALWAYS starts from the caller's own orders, so no
+   * filter can ever reach an order of somebody else.
+   */
+  private listWhere(
+    userId: string,
+    filters: OrderListFilters,
+  ): Prisma.OrderWhereInput {
+    const { statuses, createdFrom, createdTo, code } = filters;
+    return {
+      userId,
+      ...(statuses && statuses.length > 0
+        ? { status: { in: [...statuses] } }
+        : {}),
+      ...(createdFrom || createdTo
+        ? {
+            createdAt: {
+              ...(createdFrom ? { gte: createdFrom } : {}),
+              ...(createdTo ? { lte: createdTo } : {}),
+            },
+          }
+        : {}),
+      ...(code ? { id: { startsWith: code } } : {}),
     };
   }
 
@@ -137,12 +185,19 @@ export class PrismaOrderRepository implements IOrderRepository {
       const setExpiry = options.expiresAt
         ? Prisma.sql`"expiresAt" = (${options.expiresAt.toISOString()}::timestamptz AT TIME ZONE 'UTC'),`
         : Prisma.empty;
+      // When the order reaches this status, by the database clock. The column name comes from a
+      // fixed table, never from anything a user sent.
+      const timeColumn = TIMELINE_COLUMN[to];
+      const setTime = timeColumn
+        ? Prisma.sql`${Prisma.raw(`"${timeColumn}"`)} = ${DATABASE_NOW},`
+        : Prisma.empty;
       const changed = await tx.$queryRaw<{ id: string }[]>`
         UPDATE "Order"
         SET "status" = ${to}::"OrderStatus",
             "version" = "version" + 1,
             "stockReturnPending" = ("stockReturnPending" OR ${flag}::boolean),
             ${setExpiry}
+            ${setTime}
             "updatedAt" = ${DATABASE_NOW}
         WHERE "id" = ${orderId} AND "status" = ${from}::"OrderStatus"
         RETURNING "id"`;

@@ -1,4 +1,6 @@
 export * from './order-status.js';
+export * from './order-timeline.js';
+export * from './order-filters.js';
 export * from './entities/order.entity.js';
 export * from './services/order-identity.js';
 export * from './events/order-events.js';
