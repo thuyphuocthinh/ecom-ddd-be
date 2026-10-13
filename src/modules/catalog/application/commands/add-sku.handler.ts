@@ -35,6 +35,10 @@ export class AddSkuHandler implements ICommandHandler<AddSkuCommand> {
 
     const newSku = product.addSku({
       price: Price.create(command.price),
+      compareAtPrice:
+        command.compareAtPrice === undefined
+          ? null
+          : Price.create(command.compareAtPrice),
       attributes: SkuAttributes.create(command.attributes),
       skuCode: command.skuCode,
       barcode: command.barcode,

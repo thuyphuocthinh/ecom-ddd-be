@@ -8,6 +8,9 @@ import {
 import {
   PrismaService,
   PaginatedResult,
+  PagedResult,
+  toCursorPage,
+  toPage,
   CatalogErrorCodes,
   RedisService,
   CACHE,
@@ -17,7 +20,83 @@ import {
   FindProductsParams,
   SkuLookupItem,
 } from '../../../domain/repositories/catalog.repository.js';
+import {
+  COUNT_CEILING,
+  MAX_RESULT_WINDOW,
+  type CategoryProductCount,
+  type ProductSearchFilters,
+  type ProductSort,
+  type SearchProductsByCursorParams,
+  type SearchProductsByPageParams,
+} from '../../../domain/product-search.js';
 import { CatalogMapper } from '../mappers/catalog.mapper.js';
+
+// Times in the database are UTC wall time without a time zone; a moment given as text with its
+// zone is turned into that wall time to be compared with them.
+const asUtcWallTime = (moment: Date) =>
+  Prisma.sql`(${moment.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+
+/**
+ * Every sort is a FIXED piece of SQL chosen here by name: nothing a client sent is ever pasted
+ * into the query, only passed as a parameter. Ties are broken by id, so a page never repeats or
+ * skips a product.
+ */
+const orderBy = (sort: ProductSort, search?: string): Prisma.Sql => {
+  switch (sort) {
+    case 'price_asc':
+      return Prisma.sql`p."minPrice" ASC NULLS LAST, p."id" ASC`;
+    case 'price_desc':
+      return Prisma.sql`p."minPrice" DESC NULLS LAST, p."id" DESC`;
+    case 'relevance':
+      return Prisma.sql`ts_rank(p."searchVector", plainto_tsquery('simple', ${search})) DESC, p."id" DESC`;
+    default:
+      return Prisma.sql`p."createdAt" DESC, p."id" DESC`;
+  }
+};
+
+/**
+ * The conditions of a public search, all joined with AND, on a product called `p`. Only PUBLISHED
+ * products are ever here, whatever the filters say.
+ */
+function searchConditions(filters: ProductSearchFilters): Prisma.Sql[] {
+  const { categoryPath, search, minPrice, maxPrice, inStock, onSale } = filters;
+  const conditions: Prisma.Sql[] = [Prisma.sql`p."status" = 'PUBLISHED'`];
+  if (categoryPath) {
+    // Every category path ends with `/`, so `/10/` matches `/10/20/` but not `/100/`
+    conditions.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM "Category" c WHERE c."id" = p."categoryId" AND starts_with(c."path", ${categoryPath}))`,
+    );
+  }
+  if (search) {
+    conditions.push(
+      Prisma.sql`p."searchVector" @@ plainto_tsquery('simple', ${search})`,
+    );
+  }
+  if (minPrice !== undefined || maxPrice !== undefined) {
+    const range = [
+      ...(minPrice !== undefined
+        ? [Prisma.sql`s."price" >= ${minPrice}::numeric`]
+        : []),
+      ...(maxPrice !== undefined
+        ? [Prisma.sql`s."price" <= ${maxPrice}::numeric`]
+        : []),
+    ];
+    conditions.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM "Sku" s WHERE s."productId" = p."id" AND ${Prisma.join(range, ' AND ')})`,
+    );
+  }
+  if (inStock) {
+    conditions.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM "Sku" s JOIN "SkuStock" t ON t."skuId" = s."id" WHERE s."productId" = p."id" AND t."onHand" > 0)`,
+    );
+  }
+  if (onSale) {
+    conditions.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM "Sku" s WHERE s."productId" = p."id" AND s."compareAtPrice" IS NOT NULL)`,
+    );
+  }
+  return conditions;
+}
 
 @Injectable()
 export class PrismaProductRepository implements IProductRepository {
@@ -229,20 +308,127 @@ export class PrismaProductRepository implements IProductRepository {
       orderBy: { id: 'asc' }, // Keyset pagination luôn cần order by index
     });
 
-    const hasMore = products.length > limit;
-    if (hasMore) {
-      products.pop(); // Remove the extra item
+    const page = toCursorPage(products, limit, (p) => p.id);
+    return {
+      data: page.data.map((p) => CatalogMapper.toProductDomain(p)),
+      meta: page.meta,
+    };
+  }
+
+  async searchByCursor(
+    params: SearchProductsByCursorParams,
+  ): Promise<PaginatedResult<Product>> {
+    const { limit, cursor } = params;
+    const conditions = searchConditions(params);
+
+    if (cursor !== undefined) {
+      // The list is newest first, so the next page is everything older than the cursor's product
+      const anchor = await this.prisma.product.findUnique({
+        where: { id: cursor },
+        select: { id: true, createdAt: true },
+      });
+      if (!anchor) {
+        throw new CatalogDomainException(
+          CatalogErrorCodes.INVALID_SEARCH_REQUEST,
+          'cursor is not a product',
+        );
+      }
+      conditions.push(
+        Prisma.sql`(p."createdAt", p."id") < (${asUtcWallTime(anchor.createdAt)}, ${anchor.id})`,
+      );
     }
 
-    const nextCursor =
-      hasMore && products.length > 0 ? products[products.length - 1].id : null;
-
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT p."id" FROM "Product" p
+      WHERE ${Prisma.join(conditions, ' AND ')}
+      ORDER BY ${orderBy('newest')}
+      LIMIT ${limit + 1}`;
+    const page = toCursorPage(rows, limit, (row) => row.id);
     return {
-      data: products.map((p) => CatalogMapper.toProductDomain(p)),
-      meta: {
-        hasMore,
-        nextCursor,
-      },
+      data: await this.loadInOrder(page.data.map((row) => row.id)),
+      meta: page.meta,
     };
+  }
+
+  async searchByPage(
+    params: SearchProductsByPageParams,
+  ): Promise<PagedResult<Product>> {
+    const { limit, page, sort, search } = params;
+    if (page * limit > MAX_RESULT_WINDOW) {
+      // The caller checks this too; the repository does not rely on it, because this bound is
+      // what keeps the cost of OFFSET small
+      throw new CatalogDomainException(
+        CatalogErrorCodes.INVALID_SEARCH_REQUEST,
+        'page is beyond the results that can be read',
+      );
+    }
+    const where = Prisma.join(searchConditions(params), ' AND ');
+
+    const [rows, counted] = await Promise.all([
+      this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT p."id" FROM "Product" p
+        WHERE ${where}
+        ORDER BY ${orderBy(sort, search)}
+        LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
+      // Counted up to one row past the window and no further, however many products match
+      this.prisma.$queryRaw<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM (
+          SELECT 1 FROM "Product" p WHERE ${where} LIMIT ${COUNT_CEILING}
+        ) t`,
+    ]);
+    const n = counted[0]?.n ?? 0;
+    return toPage(await this.loadInOrder(rows.map((row) => row.id)), {
+      page,
+      limit,
+      total: Math.min(n, MAX_RESULT_WINDOW),
+      totalCapped: n > MAX_RESULT_WINDOW,
+    });
+  }
+
+  async findInStockSkuIds(skuIds: string[]): Promise<Set<string>> {
+    if (skuIds.length === 0) return new Set();
+    const rows = await this.prisma.skuStock.findMany({
+      where: { skuId: { in: skuIds }, onHand: { gt: 0 } },
+      select: { skuId: true },
+    });
+    return new Set(rows.map((row) => row.skuId));
+  }
+
+  async countByChildCategory(
+    parentId: string | null,
+    filters: Omit<ProductSearchFilters, 'categoryPath'>,
+  ): Promise<CategoryProductCount[]> {
+    const on = Prisma.join(searchConditions(filters), ' AND ');
+    // Each child category, joined to itself and every category below it (by path), joined to
+    // their products inside the filters: one grouped query for all the counts
+    const rows = await this.prisma.$queryRaw<
+      { id: string; name: string; count: number }[]
+    >`
+      SELECT c."id", c."name", count(p."id")::int AS "count"
+      FROM "Category" c
+      LEFT JOIN "Category" d ON starts_with(d."path", c."path")
+      LEFT JOIN "Product" p ON p."categoryId" = d."id" AND ${on}
+      WHERE c."parentId" IS NOT DISTINCT FROM ${parentId}::text
+      GROUP BY c."id", c."name"
+      ORDER BY c."name" ASC, c."id" ASC`;
+    return rows.map((row) => ({
+      categoryId: row.id,
+      name: row.name,
+      count: row.count,
+    }));
+  }
+
+  /** The products with these ids, with their SKUs, in the order the ids are given. */
+  private async loadInOrder(ids: string[]): Promise<Product[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: ids } },
+      include: { skus: true },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids
+      .map((id) => byId.get(id))
+      .filter((row): row is NonNullable<typeof row> => row !== undefined)
+      .map((row) => CatalogMapper.toProductDomain(row));
   }
 }

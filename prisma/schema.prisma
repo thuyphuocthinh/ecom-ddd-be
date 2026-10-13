@@ -58,6 +58,9 @@ model Product {
   thumbnail   String?       @db.VarChar(500)
   status      ProductStatus @default(DRAFT)
   version     Int           @default(1)
+  // The lowest price among the SKUs, kept by the repository every time a product is saved. It is
+  // what the public list sorts by price on, so it must never be written anywhere else.
+  minPrice    Decimal?      @db.Decimal(10, 2)
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -75,18 +78,23 @@ model Product {
   skus     Sku[]
 
   @@index([categoryId, status])
+  @@index([status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([status, minPrice, id])
   @@index([searchVector], type: Gin)
 }
 
 model Sku {
-  id         String   @id
-  productId  String
-  price      Decimal  @db.Decimal(10, 2)
-  attributes Json
-  skuCode    String   @unique @db.VarChar(100)
-  barcode    String?  @unique @db.VarChar(100)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String   @id
+  productId      String
+  price          Decimal  @db.Decimal(10, 2)
+  // The price before a discount, shown crossed out. For display only: everything that charges
+  // money uses `price`. Hand-written CHECK: empty, or greater than price.
+  compareAtPrice Decimal? @db.Decimal(10, 2)
+  attributes     Json
+  skuCode        String   @unique @db.VarChar(100)
+  barcode        String?  @unique @db.VarChar(100)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   product      Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
   stock        SkuStock?

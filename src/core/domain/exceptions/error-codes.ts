@@ -210,6 +210,16 @@ export const CatalogErrorCodes = {
       'SKU has stock reservations and cannot be removed; unpublish the product instead',
     status: HttpStatus.CONFLICT,
   },
+  INVALID_SEARCH_REQUEST: {
+    code: 'CAT-017',
+    message: 'This combination of search options cannot be answered',
+    status: HttpStatus.BAD_REQUEST,
+  },
+  INVALID_COMPARE_AT_PRICE: {
+    code: 'CAT-018',
+    message: 'The original price must be greater than the selling price',
+    status: HttpStatus.BAD_REQUEST,
+  },
 };
 
 export const InventoryErrorCodes = {

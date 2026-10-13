@@ -15,6 +15,8 @@ import {
   GetProductsHandler,
   GetProductByIdHandler,
   GetPublishedProductByIdHandler,
+  SearchProductsHandler,
+  GetProductFacetsHandler,
   GetCategoryByIdHandler,
   CreateCategoryHandler,
   GetCategoriesHandler,
@@ -53,6 +55,8 @@ const QueryHandlers = [
   GetProductsHandler,
   GetProductByIdHandler,
   GetPublishedProductByIdHandler,
+  SearchProductsHandler,
+  GetProductFacetsHandler,
   GetCategoriesHandler,
   GetCategoryByIdHandler,
 ];

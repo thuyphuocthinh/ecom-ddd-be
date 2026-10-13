@@ -6,3 +6,4 @@ export * from './value-objects/sku-attributes.vo.js';
 export * from './exceptions/catalog.exception.js';
 export * from './events/product-created.event.js';
 export * from './repositories/catalog.repository.js';
+export * from './product-search.js';

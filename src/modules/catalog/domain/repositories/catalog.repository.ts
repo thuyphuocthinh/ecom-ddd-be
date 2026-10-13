@@ -1,7 +1,13 @@
 import { Product } from '../entities/product.entity.js';
 import { Category } from '../entities/category.entity.js';
-import { PaginatedResult } from '@/core/index.js';
+import { PaginatedResult, PagedResult } from '@/core/index.js';
 import { ProductStatus } from '../entities/product.entity.js';
+import type {
+  CategoryProductCount,
+  ProductSearchFilters,
+  SearchProductsByCursorParams,
+  SearchProductsByPageParams,
+} from '../product-search.js';
 
 export interface FindProductsParams {
   limit: number;
@@ -41,6 +47,38 @@ export interface IProductRepository {
 
   // For Keyset pagination
   findList(params: FindProductsParams): Promise<PaginatedResult<Product>>;
+
+  /**
+   * The PUBLISHED products that fit the filters, newest first, read after the product with the
+   * given `cursor` id. One query, no `OFFSET`. Throws `CAT-017` when `cursor` is not a product.
+   */
+  searchByCursor(
+    params: SearchProductsByCursorParams,
+  ): Promise<PaginatedResult<Product>>;
+
+  /**
+   * The PUBLISHED products that fit the filters, in the order asked for, as a numbered page. The
+   * total is counted only up to `COUNT_CEILING`.
+   */
+  searchByPage(
+    params: SearchProductsByPageParams,
+  ): Promise<PagedResult<Product>>;
+
+  /**
+   * Which of these SKUs are in stock (`onHand > 0`), read now from the database and never from a
+   * cache, so a label that says "out of stock" is never older than the stock.
+   */
+  findInStockSkuIds(skuIds: string[]): Promise<Set<string>>;
+
+  /**
+   * The categories directly under `parentId` (the roots when null) with the number of PUBLISHED
+   * products in each, counting every category below it, inside the filters (the category filter
+   * itself is not one of them). Categories with no product are in the result with 0.
+   */
+  countByChildCategory(
+    parentId: string | null,
+    filters: Omit<ProductSearchFilters, 'categoryPath'>,
+  ): Promise<CategoryProductCount[]>;
 }
 
 export interface ICategoryRepository {

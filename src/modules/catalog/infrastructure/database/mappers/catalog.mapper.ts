@@ -111,6 +111,9 @@ export class CatalogMapper {
       thumbnail: product.getProps().thumbnail || null,
       status: statusMap[product.status],
       version: product.version,
+      // Worked out from the SKUs each time, so it cannot drift from them
+      minPrice:
+        product.minPrice === null ? null : new Prisma.Decimal(product.minPrice),
     };
   }
 
@@ -119,6 +122,11 @@ export class CatalogMapper {
       {
         productId: prismaSku.productId,
         price: Price.fromDecimal(prismaSku.price),
+        // A row from the product cache that was written before this column existed has none
+        compareAtPrice:
+          prismaSku.compareAtPrice == null
+            ? null
+            : Price.fromDecimal(prismaSku.compareAtPrice),
         attributes: SkuAttributes.create(
           prismaSku.attributes as Record<string, string>,
         ),
@@ -142,6 +150,9 @@ export class CatalogMapper {
       id: sku.id,
       productId: sku.productId,
       price: new Prisma.Decimal(sku.price.amount), // Strictly typed Decimal
+      compareAtPrice: sku.compareAtPrice
+        ? new Prisma.Decimal(sku.compareAtPrice.amount)
+        : null,
       attributes: sku.attributes.toPlainObject() as Prisma.JsonObject,
       skuCode: sku.skuCode,
       barcode: sku.barcode || null,

@@ -8,6 +8,7 @@ export class CreateProductCommand implements ICommand {
     public readonly thumbnail?: string,
     public readonly skus?: Array<{
       price: number;
+      compareAtPrice?: number;
       attributes: Record<string, string>;
       skuCode: string;
       barcode?: string;

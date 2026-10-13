@@ -50,6 +50,10 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
       for (const sku of command.skus) {
         product.addSku({
           price: Price.create(sku.price),
+          compareAtPrice:
+            sku.compareAtPrice === undefined
+              ? null
+              : Price.create(sku.compareAtPrice),
           attributes: SkuAttributes.create(sku.attributes),
           skuCode: sku.skuCode,
           barcode: sku.barcode,

@@ -27,7 +27,13 @@ export class UpdateSkuPriceHandler implements ICommandHandler<UpdateSkuPriceComm
       );
     }
 
-    product.updateSkuPrice(command.skuId, Price.create(command.price));
+    product.updateSkuPrice(
+      command.skuId,
+      Price.create(command.price),
+      command.compareAtPrice === undefined || command.compareAtPrice === null
+        ? command.compareAtPrice
+        : Price.create(command.compareAtPrice),
+    );
 
     await this.productRepo.save(product);
     this.logger.log(

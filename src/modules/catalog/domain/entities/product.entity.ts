@@ -66,6 +66,20 @@ export class Product extends AggregateRoot<ProductProps> {
     return this.props.version;
   }
 
+  /** The lowest selling price among the SKUs, or null when there is none. */
+  get minPrice(): number | null {
+    if (this.props.skus.length === 0) return null;
+    return Math.min(...this.props.skus.map((sku) => sku.price.amount));
+  }
+  /** Whether any SKU is sold below its original price. */
+  get onSale(): boolean {
+    return this.props.skus.some((sku) => sku.compareAtPrice !== null);
+  }
+  /** The biggest discount among the SKUs, in whole percent (0 when none is discounted). */
+  get discountPercent(): number {
+    return Math.max(0, ...this.props.skus.map((sku) => sku.discountPercent));
+  }
+
   public addSku(props: Omit<SkuProps, 'productId'>, skuId?: string): Sku {
     // Check trùng lặp attributes
     const isDuplicate = this.props.skus.some((sku) =>
@@ -95,13 +109,18 @@ export class Product extends AggregateRoot<ProductProps> {
     this.updatedAt = new Date();
   }
 
-  public updateSkuPrice(skuId: string, newPrice: Price): void {
+  /** `compareAtPrice`: a price sets the original price, `null` removes it, leaving it out keeps it. */
+  public updateSkuPrice(
+    skuId: string,
+    newPrice: Price,
+    compareAtPrice?: Price | null,
+  ): void {
     const sku = this.props.skus.find((s) => s.id === skuId);
     if (!sku) {
       throw new CatalogDomainException(CatalogErrorCodes.SKU_NOT_FOUND);
     }
 
-    sku.updatePrice(newPrice);
+    sku.updatePrice(newPrice, compareAtPrice);
     this.updatedAt = new Date();
   }
 
