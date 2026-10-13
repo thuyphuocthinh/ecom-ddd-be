@@ -1,6 +1,10 @@
 import { IQueryHandler, QueryHandler } from '@nestjs/cqrs';
 import { Inject } from '@nestjs/common';
-import { OrderErrorCodes, type PaginatedResult } from '@/core/index.js';
+import {
+  MAX_PAGE_SIZE,
+  OrderErrorCodes,
+  type PaginatedResult,
+} from '@/core/index.js';
 import {
   ALL_ORDER_STATUSES,
   OrderDomainException,
@@ -17,9 +21,6 @@ import {
   GetOrderQuery,
   ListOrdersQuery,
 } from './order.queries.js';
-
-export const MIN_PAGE_SIZE = 1;
-export const MAX_PAGE_SIZE = 50;
 
 const refuse = (reason: string): never => {
   throw new OrderDomainException(OrderErrorCodes.DOMAIN_EXCEPTION, { reason });
@@ -85,13 +86,9 @@ export class ListOrdersHandler implements IQueryHandler<
     cursor,
     filters,
   }: ListOrdersQuery): Promise<PaginatedResult<Order>> {
-    if (
-      !Number.isInteger(limit) ||
-      limit < MIN_PAGE_SIZE ||
-      limit > MAX_PAGE_SIZE
-    ) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE) {
       throw new OrderDomainException(OrderErrorCodes.DOMAIN_EXCEPTION, {
-        reason: `limit must be a whole number from ${MIN_PAGE_SIZE} to ${MAX_PAGE_SIZE}`,
+        reason: `limit must be a whole number from 1 to ${MAX_PAGE_SIZE}`,
       });
     }
     checkFilters(filters);

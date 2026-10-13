@@ -1,18 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
+import { WithCursorPagination } from '@/core/index.js';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsEnum,
-  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
-  Max,
   MaxLength,
-  Min,
 } from 'class-validator';
 import {
   ALL_ORDER_STATUSES,
@@ -97,23 +95,10 @@ export class OrderFilterQueryDto {
   }
 }
 
-export class ListOrdersQueryDto extends OrderFilterQueryDto {
-  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 50 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(50)
-  limit: number = 20;
-
-  @ApiPropertyOptional({
-    description: 'The `meta.nextCursor` of the previous page',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  cursor?: string;
-
+/** The filters, with `limit` and `cursor` as in every other list. */
+export class ListOrdersQueryDto extends WithCursorPagination(
+  OrderFilterQueryDto,
+) {
   @ApiPropertyOptional({
     description: 'One or more statuses, separated by commas',
     example: 'PENDING,PAYMENT_PROCESSING',

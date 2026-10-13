@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { PrismaService, type PaginatedResult } from '@/core/index.js';
+import {
+  PrismaService,
+  toCursorPage,
+  type PaginatedResult,
+} from '@/core/index.js';
 import {
   ALL_ORDER_STATUSES,
   Order,
@@ -72,15 +76,8 @@ export class PrismaOrderRepository implements IOrderRepository {
       take: limit + 1,
       ...(cursor !== undefined ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-    const hasMore = rows.length > limit;
-    const page = rows.slice(0, limit);
-    return {
-      data: page.map(OrderMapper.toDomain),
-      meta: {
-        hasMore,
-        nextCursor: hasMore ? page[page.length - 1].id : null,
-      },
-    };
+    const page = toCursorPage(rows, limit, (row) => row.id);
+    return { data: page.data.map(OrderMapper.toDomain), meta: page.meta };
   }
 
   async countByStatus(
