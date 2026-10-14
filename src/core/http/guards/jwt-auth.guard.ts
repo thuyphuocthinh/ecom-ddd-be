@@ -72,6 +72,16 @@ export class JwtAuthGuard implements CanActivate {
       return await this.jwtService.verifyAsync<AccessTokenPayload>(token);
     } catch (error: any) {
       this.logger.error(`JWT Verification failed: ${error.message}`);
+      if (
+        error?.name === 'TokenExpiredError' ||
+        (typeof error?.message === 'string' &&
+          error.message.toLowerCase().includes('expired'))
+      ) {
+        throw new DomainException(
+          AuthErrorCodes.TOKEN_EXPIRED,
+          'Token has expired',
+        );
+      }
       throw new DomainException(
         AuthErrorCodes.UNAUTHORIZED_ACCESS,
         'Invalid or expired token',

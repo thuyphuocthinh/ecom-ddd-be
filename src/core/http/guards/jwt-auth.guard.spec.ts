@@ -60,11 +60,23 @@ describe('JwtAuthGuard', () => {
     );
   });
 
-  it('throws UNAUTHORIZED_ACCESS when jwt.verifyAsync throws (expired/invalid)', async () => {
-    jwtService.verifyAsync.mockRejectedValue(new Error('jwt expired'));
+  it('throws TOKEN_EXPIRED when jwt.verifyAsync throws expired error', async () => {
+    const error = new Error('jwt expired');
+    error.name = 'TokenExpiredError';
+    jwtService.verifyAsync.mockRejectedValue(error);
 
     await expect(
       guard.canActivate(makeContext({ authorization: 'Bearer expired.token' })),
+    ).rejects.toSatisfy(isCode(AuthErrorCodes.TOKEN_EXPIRED.code));
+  });
+
+  it('throws UNAUTHORIZED_ACCESS when jwt.verifyAsync throws invalid token error', async () => {
+    const error = new Error('invalid signature');
+    error.name = 'JsonWebTokenError';
+    jwtService.verifyAsync.mockRejectedValue(error);
+
+    await expect(
+      guard.canActivate(makeContext({ authorization: 'Bearer invalid.token' })),
     ).rejects.toSatisfy(isCode(AuthErrorCodes.UNAUTHORIZED_ACCESS.code));
   });
 
