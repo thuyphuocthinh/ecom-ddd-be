@@ -8,12 +8,14 @@
 -- Ids are readable on purpose ("seed_..."), so they are easy to type in tests and curl calls.
 -- Prices are in VND. "Product"."searchVector" fills itself, so full-text search works at once.
 --
---   Electronics
---     Phones   : iPhone 15 (2 SKUs), Galaxy S24 (2 SKUs), AirPods Flash Sale (1 SKU, only 10 in stock)
---     Laptops  : MacBook Pro 14 (2 SKUs), Dell XPS 13 (1 SKU)
---     (a DRAFT smart watch, which customers must not see)
---   Fashion
---     T-shirts : Cotton T-shirt (3 SKUs)
+--   Điện tử
+--     Điện thoại        : iPhone 15 (2 SKUs), Samsung Galaxy S24 (2 SKUs), AirPods giá sốc (1 SKU, chỉ còn 10)
+--     Máy tính xách tay : MacBook Pro 14 (2 SKUs), Dell XPS 13 (1 SKU)
+--     (một đồng hồ thông minh DRAFT, khách không được thấy)
+--   Thời trang
+--     Áo thun           : Áo thun cotton (3 SKUs)
+--
+-- Names and descriptions are in Vietnamese so searching "điện thoại" or "áo thun" finds them.
 --
 -- On top of those hand-picked rows, the last part generates 3,000 more products (5% of them DRAFT)
 -- with 2 SKUs each, spread over the leaf categories, so lists, search and the stock tests have a few
@@ -21,22 +23,22 @@
 
 INSERT INTO "Category" ("id", "parentId", "name", "path", "isActive", "createdAt", "updatedAt")
 VALUES
-  ('seed_cat_electronics', NULL,                   'Electronics', '/seed_cat_electronics/',                        true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_cat_phones',      'seed_cat_electronics', 'Phones',      '/seed_cat_electronics/seed_cat_phones/',        true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_cat_laptops',     'seed_cat_electronics', 'Laptops',     '/seed_cat_electronics/seed_cat_laptops/',       true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_cat_fashion',     NULL,                   'Fashion',     '/seed_cat_fashion/',                            true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_cat_tshirts',     'seed_cat_fashion',     'T-shirts',    '/seed_cat_fashion/seed_cat_tshirts/',           true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
+  ('seed_cat_electronics', NULL,                   'Điện tử', '/seed_cat_electronics/',                        true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_cat_phones',      'seed_cat_electronics', 'Điện thoại', '/seed_cat_electronics/seed_cat_phones/',        true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_cat_laptops',     'seed_cat_electronics', 'Máy tính xách tay', '/seed_cat_electronics/seed_cat_laptops/',       true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_cat_fashion',     NULL,                   'Thời trang', '/seed_cat_fashion/',                            true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_cat_tshirts',     'seed_cat_fashion',     'Áo thun', '/seed_cat_fashion/seed_cat_tshirts/',           true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
 ON CONFLICT ("id") DO NOTHING;
 
 INSERT INTO "Product" ("id", "categoryId", "name", "description", "thumbnail", "status", "version", "createdAt", "updatedAt")
 VALUES
-  ('seed_prod_iphone15',    'seed_cat_phones',      'iPhone 15',          'Apple smartphone, titanium frame, 48MP camera',      'https://example.com/img/iphone15.jpg',   'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_prod_galaxy_s24',  'seed_cat_phones',      'Samsung Galaxy S24', 'Samsung smartphone with a bright 120Hz display',     'https://example.com/img/galaxy-s24.jpg', 'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_prod_airpods',     'seed_cat_phones',      'AirPods Flash Sale', 'Wireless earbuds. Limited offer: only 10 in stock',  'https://example.com/img/airpods.jpg',    'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_prod_macbook',     'seed_cat_laptops',     'MacBook Pro 14',     'Apple laptop with the M3 chip for work and play',    'https://example.com/img/macbook.jpg',    'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_prod_dellxps',     'seed_cat_laptops',     'Dell XPS 13',        'Light Windows laptop with a 13 inch screen',         'https://example.com/img/dellxps.jpg',    'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_prod_tshirt',      'seed_cat_tshirts',     'Cotton T-shirt',     'Soft 100% cotton round-neck t-shirt',                'https://example.com/img/tshirt.jpg',     'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_prod_draft_watch', 'seed_cat_electronics', 'Smart Watch (draft)','Not on sale yet: customers must not see this one', NULL,                                     'DRAFT',     1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
+  ('seed_prod_iphone15',    'seed_cat_phones',      'iPhone 15',          'Điện thoại thông minh Apple, khung titan, camera 48MP',      NULL,   'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_prod_galaxy_s24',  'seed_cat_phones',      'Samsung Galaxy S24', 'Điện thoại thông minh Samsung, màn hình 120Hz sáng rõ',     NULL, 'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_prod_airpods',     'seed_cat_phones',      'AirPods giá sốc', 'Tai nghe không dây. Ưu đãi có hạn: chỉ còn 10 chiếc',  NULL,    'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_prod_macbook',     'seed_cat_laptops',     'MacBook Pro 14',     'Máy tính xách tay Apple chip M3 cho công việc và giải trí',    NULL,    'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_prod_dellxps',     'seed_cat_laptops',     'Dell XPS 13',        'Máy tính xách tay Windows mỏng nhẹ, màn hình 13 inch',         NULL,    'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_prod_tshirt',      'seed_cat_tshirts',     'Áo thun cotton',     'Áo thun cổ tròn 100% cotton mềm mại',                NULL,     'PUBLISHED', 1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_prod_draft_watch', 'seed_cat_electronics', 'Đồng hồ thông minh (bản nháp)','Chưa bán: khách hàng không được thấy sản phẩm này', NULL,                                     'DRAFT',     1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
 ON CONFLICT ("id") DO NOTHING;
 
 INSERT INTO "Sku" ("id", "productId", "price", "attributes", "skuCode", "barcode", "createdAt", "updatedAt")
@@ -58,20 +60,20 @@ ON CONFLICT ("id") DO NOTHING;
 -- Extra leaf categories to spread the generated products over.
 INSERT INTO "Category" ("id", "parentId", "name", "path", "isActive", "createdAt", "updatedAt")
 VALUES
-  ('seed_cat_shoes', 'seed_cat_fashion', 'Shoes', '/seed_cat_fashion/seed_cat_shoes/', true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_cat_home',  NULL,               'Home',  '/seed_cat_home/',                   true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
-  ('seed_cat_books', NULL,               'Books', '/seed_cat_books/',                  true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
+  ('seed_cat_shoes', 'seed_cat_fashion', 'Giày dép', '/seed_cat_fashion/seed_cat_shoes/', true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_cat_home',  NULL,               'Đời sống', '/seed_cat_home/',                   true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')),
+  ('seed_cat_books', NULL,               'Sách', '/seed_cat_books/',                  true, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
 ON CONFLICT ("id") DO NOTHING;
 
 -- 3,000 generated products: ids seed_prod_gen_00001 ... seed_prod_gen_03000.
 INSERT INTO "Product" ("id", "categoryId", "name", "description", "thumbnail", "status", "version", "createdAt", "updatedAt")
 SELECT 'seed_prod_gen_' || lpad(n::text, 5, '0'),
        (ARRAY['seed_cat_phones','seed_cat_laptops','seed_cat_tshirts','seed_cat_shoes','seed_cat_home','seed_cat_books'])[1 + n % 6],
-       (ARRAY['Classic','Modern','Compact','Premium','Everyday','Pro','Lite','Ultra'])[1 + n % 8]
-         || ' ' || (ARRAY['Phone','Laptop','T-shirt','Sneaker','Lamp','Novel'])[1 + n % 6]
+       (ARRAY['Điện thoại','Máy tính xách tay','Áo thun','Giày thể thao','Đèn bàn','Tiểu thuyết'])[1 + n % 6]
+         || ' ' || (ARRAY['Cổ điển','Hiện đại','Nhỏ gọn','Cao cấp','Dùng hằng ngày','Chuyên nghiệp','Bản nhẹ','Siêu bền'])[1 + n % 8]
          || ' #' || n,
-       'Generated product number ' || n || ' for load and search tests',
-       'https://example.com/img/gen-' || n || '.jpg',
+       'Sản phẩm số ' || n || ' dùng để thử tải và tìm kiếm',
+       NULL || n || '.jpg',
        CASE WHEN n % 20 = 0 THEN 'DRAFT'::"ProductStatus" ELSE 'PUBLISHED'::"ProductStatus" END,
        1, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
 FROM generate_series(1, 3000) AS n
@@ -88,3 +90,39 @@ SELECT 'seed_sku_gen_' || lpad(n::text, 5, '0') || '_' || v,
        (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
 FROM generate_series(1, 3000) AS n, (VALUES ('a'), ('b')) AS variants(v)
 ON CONFLICT ("id") DO NOTHING;
+
+-- Pictures. The rows above have no picture yet: every seeded product gets a photo from picsum.photos.
+-- The product id is the "seed" of the address, so a product always shows the same photo (the photos are
+-- random, they do not show what the product is). Needs the internet to load.
+-- It runs on every execution, so running the script again also repairs products seeded earlier.
+UPDATE "Product" p
+SET "thumbnail" = 'https://picsum.photos/seed/' || p."id" || '/600/600'
+WHERE p."id" LIKE 'seed_prod_%';
+
+-- Names. Products and categories seeded earlier (in English) get the Vietnamese names too, so running
+-- this script again repairs them. Generated products are named from the same lists as above.
+UPDATE "Category" c SET "name" = v.name
+FROM (VALUES ('seed_cat_electronics', 'Điện tử'), ('seed_cat_phones', 'Điện thoại'), ('seed_cat_laptops', 'Máy tính xách tay'),
+             ('seed_cat_fashion', 'Thời trang'), ('seed_cat_tshirts', 'Áo thun'), ('seed_cat_shoes', 'Giày dép'),
+             ('seed_cat_home', 'Đời sống'), ('seed_cat_books', 'Sách')) AS v(id, name)
+WHERE c."id" = v.id AND c."name" IS DISTINCT FROM v.name;
+
+UPDATE "Product" p SET "name" = v.name, "description" = v.description
+FROM (VALUES
+  ('seed_prod_iphone15',    'iPhone 15',          'Điện thoại thông minh Apple, khung titan, camera 48MP'),
+  ('seed_prod_galaxy_s24',  'Samsung Galaxy S24', 'Điện thoại thông minh Samsung, màn hình 120Hz sáng rõ'),
+  ('seed_prod_airpods',     'AirPods giá sốc',    'Tai nghe không dây. Ưu đãi có hạn: chỉ còn 10 chiếc'),
+  ('seed_prod_macbook',     'MacBook Pro 14',     'Máy tính xách tay Apple chip M3 cho công việc và giải trí'),
+  ('seed_prod_dellxps',     'Dell XPS 13',        'Máy tính xách tay Windows mỏng nhẹ, màn hình 13 inch'),
+  ('seed_prod_tshirt',      'Áo thun cotton',     'Áo thun cổ tròn 100% cotton mềm mại'),
+  ('seed_prod_draft_watch', 'Đồng hồ thông minh (bản nháp)', 'Chưa bán: khách hàng không được thấy sản phẩm này')
+) AS v(id, name, description)
+WHERE p."id" = v.id AND (p."name" IS DISTINCT FROM v.name OR p."description" IS DISTINCT FROM v.description);
+
+UPDATE "Product" p
+SET "name" = (ARRAY['Điện thoại','Máy tính xách tay','Áo thun','Giày thể thao','Đèn bàn','Tiểu thuyết'])[1 + g.n % 6]
+             || ' ' || (ARRAY['Cổ điển','Hiện đại','Nhỏ gọn','Cao cấp','Dùng hằng ngày','Chuyên nghiệp','Bản nhẹ','Siêu bền'])[1 + g.n % 8]
+             || ' #' || g.n,
+    "description" = 'Sản phẩm số ' || g.n || ' dùng để thử tải và tìm kiếm'
+FROM (SELECT "id", substring("id" from 'seed_prod_gen_0*([0-9]+)$')::int AS n FROM "Product" WHERE "id" LIKE 'seed_prod_gen_%') g
+WHERE p."id" = g."id";
