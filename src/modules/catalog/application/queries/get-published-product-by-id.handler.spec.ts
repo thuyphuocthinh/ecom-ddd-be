@@ -23,7 +23,7 @@ describe('GetPublishedProductByIdHandler', () => {
 
   beforeEach(() => {
     productRepo = {
-      findById: vi.fn(),
+      findByIdOrSlug: vi.fn(),
       findInStockSkuIds: vi.fn().mockResolvedValue(new Set<string>()),
     };
     handler = new GetPublishedProductByIdHandler(productRepo);
@@ -31,14 +31,14 @@ describe('GetPublishedProductByIdHandler', () => {
 
   it('returns a PUBLISHED product', async () => {
     const product = productWithStatus(ProductStatus.PUBLISHED);
-    productRepo.findById.mockResolvedValueOnce(product);
+    productRepo.findByIdOrSlug.mockResolvedValueOnce(product);
 
     const result = await handler.execute(
       new GetPublishedProductByIdQuery('prod_1'),
     );
 
     expect(result.product).toBe(product);
-    expect(productRepo.findById).toHaveBeenCalledWith('prod_1');
+    expect(productRepo.findByIdOrSlug).toHaveBeenCalledWith('prod_1');
   });
 
   it('says which SKUs are in stock, read after the product (never from its cache)', async () => {
@@ -71,7 +71,7 @@ describe('GetPublishedProductByIdHandler', () => {
       },
       'prod_1',
     );
-    productRepo.findById.mockResolvedValueOnce(product);
+    productRepo.findByIdOrSlug.mockResolvedValueOnce(product);
     productRepo.findInStockSkuIds.mockResolvedValueOnce(new Set(['sku_m']));
 
     const result = await handler.execute(
@@ -88,7 +88,7 @@ describe('GetPublishedProductByIdHandler', () => {
   it.each([ProductStatus.DRAFT, ProductStatus.ARCHIVED])(
     'treats a %s product as not found',
     async (status) => {
-      productRepo.findById.mockResolvedValue(productWithStatus(status));
+      productRepo.findByIdOrSlug.mockResolvedValue(productWithStatus(status));
 
       const query = new GetPublishedProductByIdQuery('prod_1');
 
@@ -104,7 +104,7 @@ describe('GetPublishedProductByIdHandler', () => {
   );
 
   it('gives a missing product the same error as a hidden one', async () => {
-    productRepo.findById.mockResolvedValue(null);
+    productRepo.findByIdOrSlug.mockResolvedValue(null);
 
     await expect(
       handler.execute(new GetPublishedProductByIdQuery('nope')),

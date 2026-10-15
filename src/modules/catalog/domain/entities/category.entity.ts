@@ -1,9 +1,15 @@
-import { Entity, CatalogErrorCodes, snowflake } from '@/core/index.js';
+import {
+  Entity,
+  CatalogErrorCodes,
+  StringUtil,
+  snowflake,
+} from '@/core/index.js';
 import { CatalogDomainException } from '../exceptions/catalog.exception.js';
 
 export interface CategoryProps {
   parentId: string | null;
   name: string;
+  slug?: string | null;
   path: string; // VD: /parent-id/this-id/
   isActive: boolean;
 }
@@ -15,6 +21,7 @@ export class Category extends Entity<CategoryProps> {
     name: string,
     parentCategory: Category | null,
     id?: string,
+    slug?: string,
   ): Category {
     const categoryId = id || snowflake.nextId();
     let path = `/${categoryId}/`;
@@ -28,10 +35,13 @@ export class Category extends Entity<CategoryProps> {
       path = `${parentCategory.path}${categoryId}/`;
     }
 
+    const categorySlug = slug || (name ? StringUtil.slugify(name) : null);
+
     return new Category(
       {
         parentId: parentCategory ? parentCategory.id : null,
         name,
+        slug: categorySlug,
         path,
         isActive: true,
       },
@@ -41,6 +51,9 @@ export class Category extends Entity<CategoryProps> {
 
   get name(): string {
     return this.props.name;
+  }
+  get slug(): string | null {
+    return this.props.slug ?? null;
   }
   get path(): string {
     return this.props.path;
@@ -80,8 +93,18 @@ export class Category extends Entity<CategoryProps> {
     this.updatedAt = new Date();
   }
 
-  public updateDetails(name?: string, isActive?: boolean): void {
-    if (name) this.props.name = name;
+  public updateDetails(
+    name?: string,
+    isActive?: boolean,
+    slug?: string | null,
+  ): void {
+    if (name) {
+      this.props.name = name;
+      if (slug === undefined && !this.props.slug) {
+        this.props.slug = StringUtil.slugify(name);
+      }
+    }
+    if (slug !== undefined) this.props.slug = slug;
     if (isActive !== undefined) this.props.isActive = isActive;
     this.updatedAt = new Date();
   }

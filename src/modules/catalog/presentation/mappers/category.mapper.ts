@@ -7,6 +7,7 @@ export class CategoryMapper {
     return {
       id: entity.id,
       name: props.name,
+      slug: entity.slug,
       parentId: props.parentId,
       path: props.path,
       createdAt: entity.createdAt,

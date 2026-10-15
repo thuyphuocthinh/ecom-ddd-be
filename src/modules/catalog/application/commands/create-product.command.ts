@@ -13,5 +13,6 @@ export class CreateProductCommand implements ICommand {
       skuCode: string;
       barcode?: string;
     }>,
+    public readonly slug?: string,
   ) {}
 }

@@ -37,6 +37,8 @@ export interface SkuLookupItem {
 
 export interface IProductRepository {
   findById(id: string): Promise<Product | null>;
+  findByIdOrSlug(identifier: string): Promise<Product | null>;
+  findSitemapData(): Promise<Array<{ slug: string; updatedAt: Date }>>;
   save(product: Product): Promise<void>;
 
   /**
@@ -83,6 +85,8 @@ export interface IProductRepository {
 
 export interface ICategoryRepository {
   findById(id: string): Promise<Category | null>;
+  findByIdOrSlug(identifier: string): Promise<Category | null>;
+  findSitemapData(): Promise<Array<{ slug: string; updatedAt: Date }>>;
   save(category: Category): Promise<void>;
   findByParentId(parentId: string | null): Promise<Category[]>;
 

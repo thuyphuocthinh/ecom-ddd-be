@@ -53,14 +53,14 @@ export class CategoryController {
     return categories.map(CategoryMapper.toResponse);
   }
 
-  @Get(':id')
+  @Get(':identifier')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get category by ID' })
-  @ApiParam({ name: 'id', description: 'Category ID' })
+  @ApiOperation({ summary: 'Get category by ID or slug' })
+  @ApiParam({ name: 'identifier', description: 'Category ID or slug' })
   @ApiResponse({ status: 200, description: 'Category retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Category not found' })
-  async getCategoryById(@Param('id') id: string) {
-    const query = new GetCategoryByIdQuery(id);
+  async getCategoryById(@Param('identifier') identifier: string) {
+    const query = new GetCategoryByIdQuery(identifier);
     const category = await this.queryBus.execute<
       GetCategoryByIdQuery,
       Category

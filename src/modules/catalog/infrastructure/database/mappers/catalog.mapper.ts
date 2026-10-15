@@ -32,6 +32,7 @@ export class CatalogMapper {
       {
         parentId: prismaCategory.parentId,
         name: prismaCategory.name,
+        slug: prismaCategory.slug,
         path: prismaCategory.path,
         isActive: prismaCategory.isActive,
       },
@@ -55,6 +56,7 @@ export class CatalogMapper {
       id: category.id,
       parentId: category.parentId,
       name: category.name,
+      slug: category.slug,
       path: category.path,
       isActive: category.getProps().isActive,
     };
@@ -77,6 +79,7 @@ export class CatalogMapper {
       {
         categoryId: prismaProduct.categoryId,
         name: prismaProduct.name,
+        slug: prismaProduct.slug,
         description: prismaProduct.description,
         thumbnail: prismaProduct.thumbnail,
         status: statusMap[prismaProduct.status],
@@ -107,6 +110,7 @@ export class CatalogMapper {
       id: product.id,
       categoryId: product.categoryId,
       name: product.name,
+      slug: product.slug,
       description: product.getProps().description || null,
       thumbnail: product.getProps().thumbnail || null,
       status: statusMap[product.status],

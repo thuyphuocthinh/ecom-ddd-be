@@ -27,8 +27,10 @@ import {
   GetProductFacetsQuery,
   GetPublishedProductByIdQuery,
   SearchProductsQuery,
+  GetCatalogSitemapQuery,
   type ProductSearchResult,
   type PublishedProductView,
+  type SitemapEntry,
 } from '../../application/index.js';
 import type { CategoryProductCount } from '../../domain/index.js';
 import { PaginatedResponseDto } from '@/core/index.js';
@@ -131,20 +133,36 @@ export class ProductController {
     );
   }
 
-  @Get(':id')
+  // Declared BEFORE `:identifier`, or "sitemap-data" would be taken for a product identifier
+  @Get('sitemap-data')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get a published product by ID' })
-  @ApiParam({ name: 'id', description: 'Product ID' })
+  @ApiOperation({
+    summary: 'Get product sitemap data for SSR & search engine indexing',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Sitemap data retrieved successfully',
+  })
+  async getSitemapData(): Promise<SitemapEntry[]> {
+    return this.queryBus.execute<GetCatalogSitemapQuery, SitemapEntry[]>(
+      new GetCatalogSitemapQuery(),
+    );
+  }
+
+  @Get(':identifier')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get a published product by ID or slug' })
+  @ApiParam({ name: 'identifier', description: 'Product ID or slug' })
   @ApiResponse({ status: 200, description: 'Product retrieved successfully' })
   @ApiResponse({
     status: 404,
     description: 'Product not found, or not published',
   })
-  async getProductById(@Param('id') id: string) {
+  async getProductById(@Param('identifier') identifier: string) {
     const { product, inStockSkuIds } = await this.queryBus.execute<
       GetPublishedProductByIdQuery,
       PublishedProductView
-    >(new GetPublishedProductByIdQuery(id));
+    >(new GetPublishedProductByIdQuery(identifier));
     return ProductMapper.toPublicResponse(product, inStockSkuIds);
   }
 }

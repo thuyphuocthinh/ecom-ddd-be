@@ -1,4 +1,9 @@
-import { AggregateRoot, CatalogErrorCodes } from '@/core/index.js';
+import {
+  AggregateRoot,
+  CatalogErrorCodes,
+  StringUtil,
+  snowflake,
+} from '@/core/index.js';
 import { CatalogDomainException } from '../exceptions/catalog.exception.js';
 import { Sku, SkuProps } from './sku.entity.js';
 import { Price } from '../value-objects/price.vo.js';
@@ -12,6 +17,7 @@ export enum ProductStatus {
 export interface ProductProps {
   categoryId: string;
   name: string;
+  slug?: string | null;
   description?: string | null;
   thumbnail?: string | null;
   status: ProductStatus;
@@ -37,14 +43,19 @@ export class Product extends AggregateRoot<ProductProps> {
     props: Omit<ProductProps, 'status' | 'skus' | 'version'>,
     id?: string,
   ): Product {
+    const productId = id || snowflake.nextId();
+    const slug =
+      props.slug || (props.name ? `${StringUtil.slugify(props.name)}` : null);
+
     const product = new Product(
       {
         ...props,
+        slug,
         status: ProductStatus.DRAFT, // Mặc định luôn là DRAFT
         skus: [],
         version: 1,
       },
-      id,
+      productId,
     );
     // Bắn Domain Event (nếu cần)
     return product;
@@ -55,6 +66,9 @@ export class Product extends AggregateRoot<ProductProps> {
   }
   get name(): string {
     return this.props.name;
+  }
+  get slug(): string | null {
+    return this.props.slug ?? null;
   }
   get status(): ProductStatus {
     return this.props.status;
@@ -153,8 +167,15 @@ export class Product extends AggregateRoot<ProductProps> {
     name?: string,
     description?: string,
     thumbnail?: string,
+    slug?: string | null,
   ): void {
-    if (name) this.props.name = name;
+    if (name) {
+      this.props.name = name;
+      if (slug === undefined && !this.props.slug) {
+        this.props.slug = StringUtil.slugify(name);
+      }
+    }
+    if (slug !== undefined) this.props.slug = slug;
     if (description !== undefined) this.props.description = description;
     if (thumbnail !== undefined) this.props.thumbnail = thumbnail;
     this.updatedAt = new Date();

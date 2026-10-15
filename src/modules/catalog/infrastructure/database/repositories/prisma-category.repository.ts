@@ -24,6 +24,42 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     return cached ? CatalogMapper.toCategoryDomain(cached) : null;
   }
 
+  async findByIdOrSlug(identifier: string): Promise<Category | null> {
+    const cached = await this.redis.getOrSetNullableDetail(
+      CACHE.CATALOG.KEYS.CATEGORY_DETAIL(identifier),
+      TTL.SHORT,
+      async () => {
+        this.logger.debug(`Finding category by ID or Slug: ${identifier}`);
+        const byId = await this.prisma.category.findUnique({
+          where: { id: identifier },
+        });
+        if (byId) return byId;
+        return this.prisma.category.findUnique({ where: { slug: identifier } });
+      },
+    );
+    return cached ? CatalogMapper.toCategoryDomain(cached) : null;
+  }
+
+  async findSitemapData(): Promise<Array<{ slug: string; updatedAt: Date }>> {
+    const categories = await this.prisma.category.findMany({
+      where: {
+        isActive: true,
+        slug: { not: null },
+      },
+      select: {
+        slug: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 1000,
+    });
+
+    return categories.map((c) => ({
+      slug: c.slug!,
+      updatedAt: c.updatedAt,
+    }));
+  }
+
   async findByParentId(parentId: string | null): Promise<Category[]> {
     this.logger.debug(`Finding categories by parent ID: ${parentId}`);
     const categories = await this.prisma.category.findMany({
@@ -44,6 +80,11 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     await this.redis.invalidateDetail(
       CACHE.CATALOG.KEYS.CATEGORY_DETAIL(category.id),
     );
+    if (category.slug) {
+      await this.redis.invalidateDetail(
+        CACHE.CATALOG.KEYS.CATEGORY_DETAIL(category.slug),
+      );
+    }
   }
 
   async updatePathAndChildren(

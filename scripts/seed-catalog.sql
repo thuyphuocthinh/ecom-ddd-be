@@ -99,30 +99,37 @@ UPDATE "Product" p
 SET "thumbnail" = 'https://picsum.photos/seed/' || p."id" || '/600/600'
 WHERE p."id" LIKE 'seed_prod_%';
 
--- Names. Products and categories seeded earlier (in English) get the Vietnamese names too, so running
--- this script again repairs them. Generated products are named from the same lists as above.
-UPDATE "Category" c SET "name" = v.name
-FROM (VALUES ('seed_cat_electronics', 'Điện tử'), ('seed_cat_phones', 'Điện thoại'), ('seed_cat_laptops', 'Máy tính xách tay'),
-             ('seed_cat_fashion', 'Thời trang'), ('seed_cat_tshirts', 'Áo thun'), ('seed_cat_shoes', 'Giày dép'),
-             ('seed_cat_home', 'Đời sống'), ('seed_cat_books', 'Sách')) AS v(id, name)
-WHERE c."id" = v.id AND c."name" IS DISTINCT FROM v.name;
-
-UPDATE "Product" p SET "name" = v.name, "description" = v.description
+-- Names & Slugs. Products and categories get Vietnamese names and SEO-friendly slugs.
+UPDATE "Category" c SET "name" = v.name, "slug" = v.slug
 FROM (VALUES
-  ('seed_prod_iphone15',    'iPhone 15',          'Điện thoại thông minh Apple, khung titan, camera 48MP'),
-  ('seed_prod_galaxy_s24',  'Samsung Galaxy S24', 'Điện thoại thông minh Samsung, màn hình 120Hz sáng rõ'),
-  ('seed_prod_airpods',     'AirPods giá sốc',    'Tai nghe không dây. Ưu đãi có hạn: chỉ còn 10 chiếc'),
-  ('seed_prod_macbook',     'MacBook Pro 14',     'Máy tính xách tay Apple chip M3 cho công việc và giải trí'),
-  ('seed_prod_dellxps',     'Dell XPS 13',        'Máy tính xách tay Windows mỏng nhẹ, màn hình 13 inch'),
-  ('seed_prod_tshirt',      'Áo thun cotton',     'Áo thun cổ tròn 100% cotton mềm mại'),
-  ('seed_prod_draft_watch', 'Đồng hồ thông minh (bản nháp)', 'Chưa bán: khách hàng không được thấy sản phẩm này')
-) AS v(id, name, description)
-WHERE p."id" = v.id AND (p."name" IS DISTINCT FROM v.name OR p."description" IS DISTINCT FROM v.description);
+  ('seed_cat_electronics', 'Điện tử', 'dien-tu'),
+  ('seed_cat_phones', 'Điện thoại', 'dien-thoai'),
+  ('seed_cat_laptops', 'Máy tính xách tay', 'may-tinh-xach-tay'),
+  ('seed_cat_fashion', 'Thời trang', 'thoi-trang'),
+  ('seed_cat_tshirts', 'Áo thun', 'ao-thun'),
+  ('seed_cat_shoes', 'Giày dép', 'giay-dep'),
+  ('seed_cat_home', 'Đời sống', 'doi-song'),
+  ('seed_cat_books', 'Sách', 'sach')
+) AS v(id, name, slug)
+WHERE c."id" = v.id;
+
+UPDATE "Product" p SET "name" = v.name, "description" = v.description, "slug" = v.slug
+FROM (VALUES
+  ('seed_prod_iphone15',    'iPhone 15',          'Điện thoại thông minh Apple, khung titan, camera 48MP', 'dien-thoai-iphone-15'),
+  ('seed_prod_galaxy_s24',  'Samsung Galaxy S24', 'Điện thoại thông minh Samsung, màn hình 120Hz sáng rõ', 'dien-thoai-samsung-galaxy-s24'),
+  ('seed_prod_airpods',     'AirPods giá sốc',    'Tai nghe không dây. Ưu đãi có hạn: chỉ còn 10 chiếc', 'tai-nghe-airpods-gia-soc'),
+  ('seed_prod_macbook',     'MacBook Pro 14',     'Máy tính xách tay Apple chip M3 cho công việc và giải trí', 'laptop-macbook-pro-14'),
+  ('seed_prod_dellxps',     'Dell XPS 13',        'Máy tính xách tay Windows mỏng nhẹ, màn hình 13 inch', 'laptop-dell-xps-13'),
+  ('seed_prod_tshirt',      'Áo thun cotton',     'Áo thun cổ tròn 100% cotton mềm mại', 'ao-thun-cotton-co-tron'),
+  ('seed_prod_draft_watch', 'Đồng hồ thông minh (bản nháp)', 'Chưa bán: khách hàng không được thấy sản phẩm này', 'dong-ho-thong-minh-nhap')
+) AS v(id, name, description, slug)
+WHERE p."id" = v.id;
 
 UPDATE "Product" p
 SET "name" = (ARRAY['Điện thoại','Máy tính xách tay','Áo thun','Giày thể thao','Đèn bàn','Tiểu thuyết'])[1 + g.n % 6]
              || ' ' || (ARRAY['Cổ điển','Hiện đại','Nhỏ gọn','Cao cấp','Dùng hằng ngày','Chuyên nghiệp','Bản nhẹ','Siêu bền'])[1 + g.n % 8]
              || ' #' || g.n,
-    "description" = 'Sản phẩm số ' || g.n || ' dùng để thử tải và tìm kiếm'
+    "description" = 'Sản phẩm số ' || g.n || ' dùng để thử tải và tìm kiếm',
+    "slug" = 'san-pham-' || lpad(g.n::text, 5, '0')
 FROM (SELECT "id", substring("id" from 'seed_prod_gen_0*([0-9]+)$')::int AS n FROM "Product" WHERE "id" LIKE 'seed_prod_gen_%') g
 WHERE p."id" = g."id";

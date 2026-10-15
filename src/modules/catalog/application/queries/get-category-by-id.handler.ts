@@ -19,11 +19,11 @@ export class GetCategoryByIdHandler implements IQueryHandler<GetCategoryByIdQuer
       `Executing GetCategoryByIdQuery for category: ${query.id}`,
     );
 
-    const category = await this.categoryRepo.findById(query.id);
+    const category = await this.categoryRepo.findByIdOrSlug(query.id);
     if (!category) {
       throw new CatalogDomainException(
         CatalogErrorCodes.CATEGORY_NOT_FOUND,
-        `Category with ID ${query.id} not found`,
+        `Category with ID or slug ${query.id} not found`,
       );
     }
 

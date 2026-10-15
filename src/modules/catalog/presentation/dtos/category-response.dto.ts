@@ -7,6 +7,9 @@ export class CategoryResponseDto {
   @ApiProperty()
   name: string;
 
+  @ApiProperty({ required: false, nullable: true })
+  slug?: string | null;
+
   @ApiProperty({ nullable: true })
   parentId: string | null;
 

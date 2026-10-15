@@ -45,6 +45,21 @@ export class ProductResponseDto {
   name: string;
 
   @ApiProperty({ required: false, nullable: true })
+  slug?: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  metaTitle?: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  metaDescription?: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  ogImage?: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  canonicalUrl?: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
   description?: string | null;
 
   @ApiProperty({ required: false, nullable: true })

@@ -38,6 +38,7 @@ model Category {
   id        String   @id
   parentId  String?
   name      String   @db.VarChar(255)
+  slug      String?  @unique @db.VarChar(255)
   path      String   @unique @db.VarChar(500)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -52,6 +53,7 @@ model Category {
 
 model Product {
   id          String        @id
+  slug        String?       @unique @db.VarChar(255)
   categoryId  String
   name        String        @db.VarChar(255)
   description String?       @db.Text

@@ -7,6 +7,7 @@ import {
   CategoryController,
   AdminProductController,
   AdminCategoryController,
+  CatalogSitemapController,
 } from './presentation/index.js';
 
 // Handlers
@@ -18,6 +19,7 @@ import {
   SearchProductsHandler,
   GetProductFacetsHandler,
   GetCategoryByIdHandler,
+  GetCatalogSitemapHandler,
   CreateCategoryHandler,
   GetCategoriesHandler,
   DeleteCategoryHandler,
@@ -59,6 +61,7 @@ const QueryHandlers = [
   GetProductFacetsHandler,
   GetCategoriesHandler,
   GetCategoryByIdHandler,
+  GetCatalogSitemapHandler,
 ];
 
 @Module({
@@ -68,6 +71,7 @@ const QueryHandlers = [
     CategoryController,
     AdminProductController,
     AdminCategoryController,
+    CatalogSitemapController,
   ],
   providers: [
     // Repositories

@@ -30,7 +30,12 @@ export class CreateCategoryHandler implements ICommandHandler<CreateCategoryComm
       }
     }
 
-    const category = Category.create(command.name, parentCategory);
+    const category = Category.create(
+      command.name,
+      parentCategory,
+      undefined,
+      command.slug,
+    );
 
     await this.categoryRepo.save(category);
     this.logger.log(`Successfully created category with ID: ${category.id}`);

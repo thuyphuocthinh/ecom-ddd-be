@@ -8,11 +8,25 @@ export class ProductMapper {
   /** A product as the admin sees it: no stock flags (they belong to the storefront). */
   static toResponse(entity: Product): ProductResponseDto {
     const props = entity.getProps();
+    const slug = entity.slug;
+    const metaTitle = props.name ? `${props.name} | Ecom Store` : null;
+    const metaDescription =
+      props.description ||
+      (props.name
+        ? `Mua ${props.name} chính hãng, giá tốt tại Ecom Store.`
+        : null);
+    const ogImage = props.thumbnail || null;
+    const canonicalUrl = slug ? `/products/${slug}` : `/products/${entity.id}`;
 
     return {
       id: entity.id,
       categoryId: props.categoryId,
       name: props.name,
+      slug,
+      metaTitle,
+      metaDescription,
+      ogImage,
+      canonicalUrl,
       description: props.description,
       thumbnail: props.thumbnail,
       status: props.status,

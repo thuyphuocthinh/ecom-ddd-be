@@ -41,6 +41,7 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
     const product = Product.create({
       categoryId: command.categoryId,
       name: command.name,
+      slug: command.slug,
       description: command.description,
       thumbnail: command.thumbnail,
     });

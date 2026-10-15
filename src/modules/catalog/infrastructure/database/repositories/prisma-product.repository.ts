@@ -126,6 +126,48 @@ export class PrismaProductRepository implements IProductRepository {
     return cached ? CatalogMapper.toProductDomain(cached) : null;
   }
 
+  async findByIdOrSlug(identifier: string): Promise<Product | null> {
+    const cached = await this.redis.getOrSetNullableDetail(
+      CACHE.CATALOG.KEYS.PRODUCT_DETAIL(identifier),
+      TTL.SHORT,
+      async () => {
+        this.logger.debug(`Finding product by ID or Slug: ${identifier}`);
+        const byId = await this.prisma.product.findUnique({
+          where: { id: identifier },
+          include: { skus: true },
+        });
+        if (byId) return byId;
+
+        return this.prisma.product.findUnique({
+          where: { slug: identifier },
+          include: { skus: true },
+        });
+      },
+    );
+
+    return cached ? CatalogMapper.toProductDomain(cached) : null;
+  }
+
+  async findSitemapData(): Promise<Array<{ slug: string; updatedAt: Date }>> {
+    const products = await this.prisma.product.findMany({
+      where: {
+        status: 'PUBLISHED',
+        slug: { not: null },
+      },
+      select: {
+        slug: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 5000,
+    });
+
+    return products.map((p) => ({
+      slug: p.slug!,
+      updatedAt: p.updatedAt,
+    }));
+  }
+
   async save(product: Product): Promise<void> {
     this.logger.debug(`Saving product: ${product.id}`);
     const productData = CatalogMapper.toProductPersistence(product);
@@ -223,6 +265,11 @@ export class PrismaProductRepository implements IProductRepository {
     await this.redis.invalidateDetail(
       CACHE.CATALOG.KEYS.PRODUCT_DETAIL(product.id),
     );
+    if (product.slug) {
+      await this.redis.invalidateDetail(
+        CACHE.CATALOG.KEYS.PRODUCT_DETAIL(product.slug),
+      );
+    }
   }
 
   async findSkusByIds(skuIds: string[]): Promise<SkuLookupItem[]> {

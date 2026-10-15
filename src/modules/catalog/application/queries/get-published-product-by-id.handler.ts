@@ -28,7 +28,7 @@ export class GetPublishedProductByIdHandler implements IQueryHandler<
   async execute(
     query: GetPublishedProductByIdQuery,
   ): Promise<PublishedProductView> {
-    const product = await this.productRepo.findById(query.id);
+    const product = await this.productRepo.findByIdOrSlug(query.id);
 
     // The status is checked on what was just read (cache or database), so a
     // product that was hidden a moment ago is never served from a stale entry.
@@ -37,7 +37,7 @@ export class GetPublishedProductByIdHandler implements IQueryHandler<
     if (!product || product.status !== ProductStatus.PUBLISHED) {
       throw new CatalogDomainException(
         CatalogErrorCodes.PRODUCT_NOT_FOUND,
-        `Product with ID ${query.id} not found`,
+        `Product with ID or slug ${query.id} not found`,
       );
     }
     // The product may come from the cache (5 minutes), the stock never does: it is read now, so
