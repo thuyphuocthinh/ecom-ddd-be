@@ -9,8 +9,10 @@ import {
   Post,
   Query,
   Res,
+  Sse,
   UseGuards,
 } from '@nestjs/common';
+import type { MessageEvent } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
   ApiBearerAuth,
@@ -21,6 +23,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import type { Observable } from 'rxjs';
 import {
   CurrentUser,
   JwtAuthGuard,
@@ -34,6 +37,7 @@ import {
   CountOrdersByStatusQuery,
   GetOrderQuery,
   ListOrdersQuery,
+  OrderStatusStreamService,
   PlaceOrderCommand,
   type PlaceOrderResult,
 } from '../../application/index.js';
@@ -60,6 +64,13 @@ const READ_LIMIT = {
   key: 'user',
 } as const;
 
+// Opening a stream is rarer than reading an order: one stream per order page, and it stays open
+const STREAM_LIMIT = {
+  limit: 20,
+  window: buildTTL('MINUTE', 1),
+  key: 'user',
+} as const;
+
 /** The orders of the signed-in user. There is no way to name another user here. */
 @ApiTags('Orders')
 @Controller('orders')
@@ -69,6 +80,7 @@ export class OrderController {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
+    private readonly statusStream: OrderStatusStreamService,
   ) {}
 
   @Post()
@@ -175,6 +187,27 @@ export class OrderController {
       OrderStatusCounts
     >(new CountOrdersByStatusQuery(user.id, query.toFilters()));
     return OrderViewMapper.toCounts(counts);
+  }
+
+  @Sse(':id/events')
+  @RateLimit(STREAM_LIMIT)
+  @ApiOperation({
+    summary:
+      'The status of one of my orders, pushed as it changes (server-sent events)',
+    description:
+      'Sends `event: status` with `{ orderId, status }` first with the current status, then at every change; `event: ping` every 20 seconds keeps the connection alive. The stream ends by itself at a final status (DELIVERED, CANCELLED, EXPIRED) and after 30 minutes. Treat a message as "reload the order", not as the data. Send the access token in the `Authorization` header (use `fetch`: `EventSource` cannot).',
+  })
+  @ApiParam({ name: 'id' })
+  @ApiResponse({ status: 200, description: 'text/event-stream' })
+  @ApiResponse({
+    status: 404,
+    description: 'Not found, or not yours (ORD-002): the same answer',
+  })
+  events(
+    @CurrentUser() user: ICurrentUser,
+    @Param('id') id: string,
+  ): Promise<Observable<MessageEvent>> {
+    return this.statusStream.open(user.id, id);
   }
 
   @Get(':id')

@@ -14,5 +14,7 @@ export * from './commands/shipping.handlers.js';
 export * from './queries/order.queries.js';
 export * from './queries/order.query-handlers.js';
 export * from './order-move.js';
+export * from './services/order-status-stream.service.js';
+export * from './listeners/order-status-feed.listener.js';
 export * from './commands/payment-steps.commands.js';
 export * from './commands/payment-steps.handlers.js';

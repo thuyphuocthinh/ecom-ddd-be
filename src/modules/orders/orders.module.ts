@@ -24,12 +24,16 @@ import {
   FindStuckPaymentOrdersHandler,
   GetOrderByIdHandler,
   CountOrdersByStatusHandler,
+  OrderStatusFeedListener,
+  OrderStatusStreamService,
 } from './application/index.js';
 import {
   OutboxPublisher,
   PrismaOrderRepository,
   PrismaOutboxStore,
+  RedisOrderStatusFeed,
 } from './infrastructure/index.js';
+import { ORDER_STATUS_FEED } from './domain/index.js';
 import { ordersConfig } from './orders.config.js';
 import { AdminOrderController, OrderController } from './presentation/index.js';
 
@@ -74,6 +78,9 @@ const QueryHandlers = [
   providers: [
     { provide: 'IOrderRepository', useClass: PrismaOrderRepository },
     { provide: 'IOutboxStore', useClass: PrismaOutboxStore },
+    { provide: ORDER_STATUS_FEED, useClass: RedisOrderStatusFeed },
+    OrderStatusFeedListener,
+    OrderStatusStreamService,
     OutboxPublisher,
     OrderStockReturner,
     OrderMaintenance,

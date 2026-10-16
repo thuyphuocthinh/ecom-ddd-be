@@ -7,6 +7,9 @@ import {
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
+/** The key Nest stores on a route marked with @Sse() (`SSE_METADATA` in @nestjs/common). */
+export const SSE_METADATA = '__sse__';
+
 export interface StandardResponse<T> {
   statusCode: number;
   message: string;
@@ -23,6 +26,12 @@ export class ResponseInterceptor<T> implements NestInterceptor<
     context: ExecutionContext,
     next: CallHandler,
   ): Observable<StandardResponse<T>> {
+    // A server-sent-events route sends its messages as they are: wrapping each one in
+    // { statusCode, message, data } would break the stream format.
+    if (Reflect.getMetadata(SSE_METADATA, context.getHandler())) {
+      return next.handle();
+    }
+
     return next.handle().pipe(
       map((result) => {
         const statusCode = context.switchToHttp().getResponse().statusCode;

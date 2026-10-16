@@ -7,3 +7,4 @@ export * from './events/order-events.js';
 export * from './exceptions/order.exception.js';
 export * from './repositories/order.repository.js';
 export * from './ports/outbox.port.js';
+export * from './ports/order-status-feed.port.js';
