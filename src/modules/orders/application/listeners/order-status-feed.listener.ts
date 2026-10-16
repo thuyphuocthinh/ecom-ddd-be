@@ -7,14 +7,12 @@ import {
 import {
   ORDER_STATUS_CHANGED,
   ORDER_STATUS_FEED,
-  OrderStatus,
+  isOrderStatus,
   type IOrderStatusFeed,
 } from '../../domain/index.js';
 
 /** The queue of this consumer on the event bus. Its own queue: it never competes with another consumer. */
 export const ORDER_STATUS_FEED_CONSUMER = 'orders.status-feed';
-
-const STATUSES = new Set<string>(Object.values(OrderStatus));
 
 /**
  * A consumer of the event bus that passes "order X is now in status S" on to the order status feed.
@@ -44,8 +42,8 @@ export class OrderStatusFeedListener implements OnModuleInit {
     if (!data || typeof data !== 'object') return;
     const { orderId, to } = data as Record<string, unknown>;
     if (typeof orderId !== 'string' || orderId === '') return;
-    if (typeof to !== 'string' || !STATUSES.has(to)) return;
+    if (!isOrderStatus(to)) return;
 
-    await this.feed.publish({ orderId, status: to as OrderStatus });
+    await this.feed.publish({ orderId, status: to });
   }
 }

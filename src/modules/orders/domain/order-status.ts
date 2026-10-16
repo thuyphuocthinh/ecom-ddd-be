@@ -91,3 +91,10 @@ export function canTransition(
       (step.only === undefined || step.only === paymentMethod),
   );
 }
+
+const ALL_STATUSES = new Set<string>(Object.values(OrderStatus));
+
+/** Whether a value read from outside (an event, a message) is one of the statuses. */
+export function isOrderStatus(value: unknown): value is OrderStatus {
+  return typeof value === 'string' && ALL_STATUSES.has(value);
+}

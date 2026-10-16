@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { MessageEvent } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 import { Observable } from 'rxjs';
 import {
@@ -11,13 +10,18 @@ import {
 } from '../../domain/index.js';
 import { GetOrderQuery } from '../queries/order.queries.js';
 
-/** A line to keep the connection alive: proxies and browsers close a stream that stays silent. */
+/** What a stream says: the order is in this status, or "still here" to keep the connection alive. */
+export type OrderStreamMessage =
+  { kind: 'status'; orderId: string; status: OrderStatus } | { kind: 'ping' };
+
+/** A message to keep the connection alive: proxies and browsers close a stream that stays silent. */
 export const HEARTBEAT_MS = 20_000;
 /** The longest one stream stays open; the browser opens a new one and gets the current status first. */
 export const MAX_STREAM_MS = 30 * 60_000;
 
 /**
- * The stream of status messages of one order, for server-sent events.
+ * The messages about one order, for a client that keeps a connection open (server-sent events). How
+ * a message is written on the wire is the controller's business; this only decides what to say.
  *
  * - Somebody else's order (or none) is refused up front with the same error as reading it (ORD-002),
  *   before anything is registered or any connection is kept.
@@ -25,7 +29,7 @@ export const MAX_STREAM_MS = 30 * 60_000;
  *   A message can still arrive older than the first read: a reader takes a message as "reload the
  *   order", never as the data itself.
  * - It ends by itself when the order reaches a final status, after `MAX_STREAM_MS`, or when the
- *   browser goes away; in every case the listener and the timers are removed.
+ *   client goes away; in every case the listener and the timers are removed.
  */
 @Injectable()
 export class OrderStatusStreamService {
@@ -37,18 +41,18 @@ export class OrderStatusStreamService {
   async open(
     userId: string,
     orderId: string,
-  ): Promise<Observable<MessageEvent>> {
+  ): Promise<Observable<OrderStreamMessage>> {
     await this.read(userId, orderId); // refuses an order that is not the user's
 
-    return new Observable<MessageEvent>((subscriber) => {
-      const send = (status: OrderStatus): void => {
-        subscriber.next({ type: 'status', data: { orderId, status } });
+    return new Observable<OrderStreamMessage>((subscriber) => {
+      const say = (status: OrderStatus): void => {
+        subscriber.next({ kind: 'status', orderId, status });
         if (FINAL_STATUSES.includes(status)) subscriber.complete();
       };
 
-      const unwatch = this.feed.watch(orderId, (update) => send(update.status));
+      const unwatch = this.feed.watch(orderId, (update) => say(update.status));
       const heartbeat = setInterval(
-        () => subscriber.next({ type: 'ping', data: {} }),
+        () => subscriber.next({ kind: 'ping' }),
         HEARTBEAT_MS,
       );
       const lifetime = setTimeout(() => subscriber.complete(), MAX_STREAM_MS);
@@ -56,11 +60,11 @@ export class OrderStatusStreamService {
       lifetime.unref();
 
       this.read(userId, orderId).then(
-        (order) => send(order.status),
+        (order) => say(order.status),
         (error: Error) => subscriber.error(error),
       );
 
-      // Runs when the stream completes, fails, or the browser disconnects
+      // Runs when the stream completes, fails, or the client disconnects
       return () => {
         clearInterval(heartbeat);
         clearTimeout(lifetime);

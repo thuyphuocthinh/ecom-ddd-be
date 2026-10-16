@@ -1,4 +1,3 @@
-import type { MessageEvent } from '@nestjs/common';
 import type { QueryBus } from '@nestjs/cqrs';
 import { OrderStatus } from '../../domain/index.js';
 import { InMemoryOrderStatusFeed } from '../../infrastructure/feed/in-memory-order-status-feed.js';
@@ -6,6 +5,7 @@ import {
   HEARTBEAT_MS,
   MAX_STREAM_MS,
   OrderStatusStreamService,
+  type OrderStreamMessage,
 } from './order-status-stream.service.js';
 
 const USER = 'user-1';
@@ -25,7 +25,7 @@ function setup(read: () => Promise<{ status: OrderStatus }>) {
 /** Subscribes and collects what the stream sends. */
 async function listen(service: OrderStatusStreamService, orderId = ORDER) {
   const stream = await service.open(USER, orderId);
-  const messages: MessageEvent[] = [];
+  const messages: OrderStreamMessage[] = [];
   const state = { completed: false, error: undefined as unknown };
   const subscription = stream.subscribe({
     next: (message) => messages.push(message),
@@ -35,9 +35,10 @@ async function listen(service: OrderStatusStreamService, orderId = ORDER) {
   return { messages, state, subscription };
 }
 
-const status = (value: OrderStatus, orderId = ORDER): MessageEvent => ({
-  type: 'status',
-  data: { orderId, status: value },
+const status = (value: OrderStatus, orderId = ORDER): OrderStreamMessage => ({
+  kind: 'status',
+  orderId,
+  status: value,
 });
 
 describe('OrderStatusStreamService', () => {
@@ -144,7 +145,7 @@ describe('OrderStatusStreamService', () => {
 
     await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 3);
 
-    const pings = messages.filter((message) => message.type === 'ping');
+    const pings = messages.filter((message) => message.kind === 'ping');
     expect(pings).toHaveLength(3);
   });
 

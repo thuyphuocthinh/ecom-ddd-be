@@ -50,8 +50,9 @@ describe('RedisOrderStatusFeed (Integration)', () => {
     redisB = new RedisService();
     copyA = new RedisOrderStatusFeed(redisA);
     copyB = new RedisOrderStatusFeed(redisB);
-    await copyA.onModuleInit();
-    await copyB.onModuleInit();
+    copyA.onModuleInit();
+    copyB.onModuleInit();
+    await Promise.all([copyA.subscribed, copyB.subscribed]);
   });
 
   afterAll(async () => {

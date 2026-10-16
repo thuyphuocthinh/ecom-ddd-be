@@ -23,7 +23,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
-import type { Observable } from 'rxjs';
+import { map, type Observable } from 'rxjs';
 import {
   CurrentUser,
   JwtAuthGuard,
@@ -50,6 +50,7 @@ import {
   OrderSummaryResponseDto,
   PlaceOrderDto,
 } from '../dtos/order.dto.js';
+import { OrderStreamMapper } from '../mappers/order-stream.mapper.js';
 import { OrderViewMapper } from '../mappers/order-view.mapper.js';
 
 // Each route is counted on its own, per user, per minute
@@ -203,11 +204,12 @@ export class OrderController {
     status: 404,
     description: 'Not found, or not yours (ORD-002): the same answer',
   })
-  events(
+  async events(
     @CurrentUser() user: ICurrentUser,
     @Param('id') id: string,
   ): Promise<Observable<MessageEvent>> {
-    return this.statusStream.open(user.id, id);
+    const messages = await this.statusStream.open(user.id, id);
+    return messages.pipe(map(OrderStreamMapper.toMessageEvent));
   }
 
   @Get(':id')
